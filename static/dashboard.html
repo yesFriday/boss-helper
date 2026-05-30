@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOSS直聘自动化控制台</title>
+<style>
+:root {
+  --accent: #6366f1;
+  --accent-light: #818cf8;
+  --accent-dark: #4f46e5;
+  --green: #10b981;
+  --green-light: #34d399;
+  --orange: #f59e0b;
+  --red: #ef4444;
+  --text: #1e293b;
+  --text-2: #475569;
+  --text-3: #94a3b8;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --bg: #f8fafc;
+  --sidebar-bg: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  --sidebar-text: #cbd5e1;
+  --sidebar-active: rgba(99, 102, 241, 0.2);
+  --hover: #f1f5f9;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+/* App Layout */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+/* Sidebar */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+}
+
+.sidebar-logo {
+  padding: 0 24px;
+  margin-bottom: 28px;
+}
+
+.sidebar-logo h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.sidebar-logo div {
+  font-size: 12px;
+  color: var(--accent-light);
+  margin-top: 6px;
+  font-weight: 500;
+}
+
+.sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px;
+}
+
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  color: var(--sidebar-text);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+}
+
+.sidebar-nav a:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.sidebar-nav a.active {
+  color: #fff;
+  background: var(--sidebar-active);
+  font-weight: 600;
+}
+
+.sidebar-nav a .icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+.sidebar-status {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-status .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--sidebar-text);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.dot.on { background: var(--green); color: var(--green); }
+.dot.off { background: var(--text-3); color: transparent; }
+
+/* Main Content */
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  background: var(--bg);
+}
+
+.main-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.main-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+/* Tabs */
+.tab { display: none; }
+.tab.active { display: block; }
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+  font-family: var(--font);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.5;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-light) 0%, var(--accent) 100%);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, var(--green) 0%, #059669 100%);
+  color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--green-light) 0%, var(--green) 100%);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--red) 0%, #dc2626 100%);
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f87171 0%, var(--red) 100%);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.btn-xs {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+/* Sections */
+.section {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Search Bar */
+.search-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.search-bar input,
+.search-bar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  font-family: var(--font);
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+}
+
+.search-bar input:focus,
+.search-bar select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.search-bar input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.search-bar input::placeholder {
+  color: var(--text-3);
+}
+
+.search-bar select {
+  min-width: 100px;
+  cursor: pointer;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card .num {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.stat-card .lbl {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+/* Jobs Grid */
+.jobs-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.job-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.job-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent);
+}
+
+.job-card .title {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 200px;
+  flex-shrink: 0;
+  letter-spacing: -0.01em;
+}
+
+.job-card .title a {
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.job-card .title a:hover {
+  color: var(--accent);
+}
+
+.job-card .meta {
+  font-size: 13px;
+  color: var(--text-2);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.job-card .salary {
+  color: var(--red);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.job-card .actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-applied {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.badge-replied {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge-skipped {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.badge-failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-missing_url {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+th, td {
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  background: var(--bg);
+  color: var(--text-3);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+td a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+td a:hover {
+  text-decoration: underline;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tr:hover td {
+  background: var(--hover);
+}
+
+/* Chat Container */
+.chat-container {
+  display: flex;
+  height: 70vh;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.chat-list {
+  width: 280px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.chat-list-item {
+  padding: 14px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.chat-list-item:hover {
+  background: var(--surface);
+}
+
+.chat-list-item.active {
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+}
+
+.chat-list-item .name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chat-list-item .preview {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-list-item .unread {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 8px;
+}
+
+.chat-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  background: var(--bg);
+}
+
+.msg-bubble {
+  max-width: 80%;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.msg-hr {
+  align-self: flex-start;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.msg-me {
+  align-self: flex-end;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  color: #fff;
+}
+
+.msg-me.ai {
+  background: linear-gradient(135deg, var(--green) 0%, #059669 100%);
+}
+
+.msg-label {
+  font-size: 11px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.msg-hr .msg-label {
+  color: var(--text-3);
+}
+
+.msg-me .msg-label {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.chat-input-area {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  background: var(--surface);
+}
+
+.chat-input-area textarea {
+  flex: 1;
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  color: var(--text);
+  font-size: 14px;
+  resize: none;
+  outline: none;
+  min-height: 44px;
+  max-height: 120px;
+  font-family: var(--font);
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+  background: var(--bg);
+}
+
+.chat-input-area textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.chat-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+}
+
+.chat-header .info {
+  font-size: 13px;
+}
+
+.chat-header .name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.chat-header .company {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* Settings */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-row label {
+  width: 130px;
+  font-size: 13px;
+  color: var(--text-2);
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.setting-row input,
+.setting-row textarea,
+.setting-row select {
+  flex: 1;
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  font-family: var(--font);
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+  background: var(--bg);
+}
+
+.setting-row textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.setting-row input:focus,
+.setting-row textarea:focus,
+.setting-row select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.setting-row select {
+  cursor: pointer;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 20px;
+}
+
+.pagination button {
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.pagination button:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination span {
+  font-size: 13px;
+  color: var(--text-3);
+  padding: 0 12px;
+  font-weight: 500;
+}
+
+/* Empty State */
+.empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-3);
+  font-size: 14px;
+}
+
+/* Spinner */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+#searchStatus,
+#applyProgress {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+  padding: 12px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  margin-top: 12px;
+}
+
+/* Modal */
+.analyze-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Wechat Card */
+.hr-wechat-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.hr-wechat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Funnel Bar */
+.funnel-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.funnel-item {
+  padding: 16px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.funnel-item:last-child {
+  border-right: none;
+}
+
+.funnel-item:hover {
+  background: var(--hover);
+}
+
+.funnel-item .num {
+  font-size: 28px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.funnel-item .lbl {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+/* Animations */
+@keyframes slideIn {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.tab.active {
+  animation: slideIn 0.3s ease;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 60px;
+    padding: 12px 0;
+  }
+
+  .sidebar-logo h1,
+  .sidebar-nav a span:not(.icon),
+  .sidebar-status .row span:nth-child(2) {
+    display: none;
+  }
+
+  .sidebar-nav a {
+    justify-content: center;
+    padding: 12px 0;
+  }
+
+  .sidebar-logo {
+    padding: 0 12px;
+    margin-bottom: 20px;
+  }
+
+  .main {
+    padding: 16px;
+  }
+
+  .chat-container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .chat-list {
+    width: 100%;
+    max-height: 200px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .job-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .job-card .actions {
+    margin-left: 0;
+    margin-top: 12px;
+    width: 100%;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>BOSS 控制台</h1>
+      <div>AI 驱动 · 自动化求职</div>
+    </div>
+    <nav class="sidebar-nav" id="sideNav">
+      <a class="active" data-tab="search"><span class="icon">🔍</span><span>岗位搜索</span></a>
+      <a data-tab="applications"><span class="icon">📋</span><span>投递记录</span></a>
+      <a data-tab="chat"><span class="icon">💬</span><span>聊天</span></a>
+      <a data-tab="wechat"><span class="icon">📱</span><span>微信记录</span></a>
+      <a data-tab="settings"><span class="icon">⚙</span><span>设置</span></a>
+    </nav>
+    <div class="sidebar-status">
+      <div class="row"><span class="dot off" id="browserDot"></span><span>浏览器 <span id="browserStatus">未启动</span></span></div>
+      <div class="row"><span class="dot off" id="monitorDot"></span><span>监控 <span id="monitorStatus">未启动</span></span><button class="btn btn-xs btn-secondary" id="btnMonitorToggle" onclick="toggleMonitor()" style="display:none;margin-left:auto;">暂停</button></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="main-header">
+      <h2 id="pageTitle">岗位搜索</h2>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-success" id="btnStart" onclick="startSystem()">启动浏览器</button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopSystem()" disabled>停止</button>
+      </div>
+    </div>
+
+    <!-- Tab 1: Search -->
+    <div class="tab active" id="tab-search">
+      <div class="search-bar">
+        <input type="text" id="searchKeyword" placeholder="关键词" value="AI Agent">
+        <select id="searchCity">
+          <optgroup label="山东省"><option value="济南">济南</option><option value="青岛">青岛</option><option value="淄博" selected>淄博</option><option value="潍坊">潍坊</option><option value="烟台">烟台</option><option value="济宁">济宁</option><option value="临沂">临沂</option><option value="泰安">泰安</option><option value="威海">威海</option><option value="东营">东营</option><option value="滨州">滨州</option><option value="菏泽">菏泽</option><option value="枣庄">枣庄</option><option value="日照">日照</option><option value="聊城">聊城</option><option value="德州">德州</option></optgroup>
+          <optgroup label="一线城市"><option value="北京">北京</option><option value="上海">上海</option><option value="广州">广州</option><option value="深圳">深圳</option></optgroup>
+          <optgroup label="新一线"><option value="成都">成都</option><option value="杭州">杭州</option><option value="武汉">武汉</option><option value="南京">南京</option><option value="重庆">重庆</option><option value="西安">西安</option><option value="长沙">长沙</option><option value="天津">天津</option><option value="苏州">苏州</option><option value="郑州">郑州</option><option value="东莞">东莞</option><option value="沈阳">沈阳</option><option value="宁波">宁波</option><option value="昆明">昆明</option></optgroup>
+          <optgroup label="其他省会"><option value="合肥">合肥</option><option value="福州">福州</option><option value="厦门">厦门</option><option value="南昌">南昌</option><option value="贵阳">贵阳</option><option value="南宁">南宁</option><option value="太原">太原</option><option value="石家庄">石家庄</option><option value="哈尔滨">哈尔滨</option><option value="长春">长春</option><option value="兰州">兰州</option><option value="乌鲁木齐">乌鲁木齐</option><option value="呼和浩特">呼和浩特</option><option value="拉萨">拉萨</option><option value="西宁">西宁</option><option value="银川">银川</option><option value="海口">海口</option><option value="三亚">三亚</option></optgroup>
+          <option value="全国">全国</option>
+        </select>
+        <button class="btn btn-primary" id="btnSearch" onclick="doSearch()">搜索</button>
+        <input type="text" id="searchWelfare" placeholder="福利:双休,五险一金" style="max-width:160px;">
+        <button class="btn btn-success" onclick="batchSearch()">一键搜索</button>
+        <button class="btn btn-primary" onclick="batchApplyAll()">一键投递</button>
+      </div>
+      <div id="searchStatus"></div>
+      <div id="funnelBar" style="display:none;margin-top:8px;"></div>
+      <div class="jobs-grid" id="jobsGrid"><div class="empty">点击搜索获取岗位</div></div>
+    </div>
+
+    <!-- Tab 2: Applications -->
+    <div class="tab" id="tab-applications">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="num" id="statToday">0</div>
+          <div class="lbl">今日投递</div>
+        </div>
+        <div class="stat-card">
+          <div class="num" id="statPending">0</div>
+          <div class="lbl">待投递</div>
+        </div>
+        <div class="stat-card">
+          <div class="num" id="statReplied">0</div>
+          <div class="lbl">HR已回复</div>
+        </div>
+        <div class="stat-card">
+          <div class="num" id="statLimit">15</div>
+          <div class="lbl">每日上限</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-sm btn-secondary" onclick="loadApplications('')">全部</button>
+            <button class="btn btn-sm btn-secondary" onclick="loadApplications('pending')">待投递</button>
+            <button class="btn btn-sm btn-secondary" onclick="loadApplications('applied')">已投递</button>
+            <button class="btn btn-sm btn-secondary" onclick="loadApplications('replied')">已回复</button>
+            <button class="btn btn-sm btn-secondary" onclick="loadShortlists()">收藏</button>
+          </div>
+          <button class="btn btn-primary" onclick="batchApplyPending()">
+            <span>⚡</span> 一键投递待投递
+          </button>
+        </div>
+
+        <div id="applyProgress"></div>
+
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>岗位</th>
+                <th>公司</th>
+                <th>薪资</th>
+                <th>城市</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="appTableBody">
+              <tr><td colspan="6" class="empty">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination" id="appPagination"></div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Chat -->
+    <div class="tab" id="tab-chat">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span style="font-size:12px;color:var(--text-3);">数据库会话记录</span>
+        <button class="btn btn-sm btn-secondary" onclick="navigateBrowserToChat()">在浏览器中打开BOSS聊天页</button>
+      </div>
+      <div class="chat-container">
+        <div class="chat-list" id="conversationList"><div class="empty" style="padding:20px;">暂无会话</div></div>
+        <div class="chat-pane">
+          <div class="chat-header" id="chatHeader">
+            <div class="info"><span class="name">选择会话</span><br><span class="company">点击左侧会话开始查看</span></div>
+            <div style="display:flex;gap:6px;"><button class="btn btn-sm btn-secondary" id="btnAutoReplyToggle" onclick="toggleAutoReply()" disabled>暂停AI</button><button class="btn btn-sm btn-primary" id="btnManualSend" onclick="sendManualMessage()" disabled>手动发送</button></div>
+          </div>
+          <div class="chat-messages" id="chatMessages"><div class="empty">选择一个会话查看消息</div></div>
+          <div class="chat-input-area"><textarea id="chatInput" placeholder="输入消息..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendManualMessage();}"></textarea></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Wechat -->
+    <div class="tab" id="tab-wechat">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <h3 style="margin:0;">已获取的 HR 微信</h3>
+        <button class="btn btn-sm btn-secondary" onclick="loadWechatExchanges()">刷新</button>
+      </div>
+      <div id="wechatExchangesList"><div class="empty">暂无微信记录</div></div>
+    </div>
+
+    <!-- Tab 5: Settings -->
+    <div class="tab" id="tab-settings">
+      <div class="section">
+        <h3>招呼语设置</h3>
+        <div class="setting-row">
+          <label>招呼语模板</label>
+          <textarea id="setGreeting">您好，我对贵公司的{job_title}岗位很感兴趣，请问可以详细了解一下吗？</textarea>
+        </div>
+        <div class="setting-row">
+          <label>AI回复风格</label>
+          <select id="setStyle">
+            <option value="professional">专业</option>
+            <option value="casual">轻松</option>
+            <option value="enthusiastic">热情</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>频率限制</h3>
+        <div class="setting-row">
+          <label>每日投递上限</label>
+          <input type="number" id="setDailyLimit" value="15" min="1" max="30">
+        </div>
+        <div class="setting-row">
+          <label>回复间隔(秒)</label>
+          <div style="display:flex; gap:10px; flex:1; align-items:center;">
+            <input type="number" id="setMinDelay" value="30" min="10" max="300" style="flex:1;">
+            <span style="color:var(--text-3); font-weight:600;">—</span>
+            <input type="number" id="setMaxDelay" value="120" min="20" max="600" style="flex:1;">
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>个人资料</h3>
+        <div class="setting-row">
+          <label>微信号</label>
+          <input type="text" id="setWechat" placeholder="AI会引导HR添加">
+        </div>
+        <div class="setting-row">
+          <label>简历摘要</label>
+          <textarea id="setResume" placeholder="技能、项目经验...">AI应用开发工程师，熟练Python/LangChain/RAG/Agent开发，有MCP、AutoGen等框架实战经验，做过多个企业级AI应用落地项目。</textarea>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>搜索关键词</h3>
+        <div class="setting-row">
+          <label>关键词</label>
+          <textarea id="setSearchKeywords" rows="5" placeholder="AI Agent&#10;大模型开发&#10;AI产品经理&#10;RAG开发" style="min-height:80px;"></textarea>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>AI模型配置</h3>
+        <div class="setting-row">
+          <label>平台</label>
+          <select id="setAIPlatform" onchange="onPlatformChange()">
+            <option value="">-- 选择平台 --</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="mimo">小米MiMo</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>API Key</label>
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <input type="password" id="setAIApiKey" placeholder="输入API Key" style="flex:1;">
+            <span id="aiKeyStatus" style="font-size:11px;"></span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Base URL</label>
+          <input type="text" id="setAIBaseUrl" placeholder="自动填充">
+        </div>
+        <div class="setting-row">
+          <label>模型</label>
+          <input type="text" id="setAIModel" list="modelList" placeholder="选择或输入模型名" style="flex:1;">
+          <datalist id="modelList"></datalist>
+        </div>
+        <div class="setting-row">
+          <label>自动回复</label>
+          <select id="setAutoReply">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
+        <div style="font-size:12px; color:var(--text-3); margin-top:8px; padding-left:130px;">
+          选择平台后自动填充 Base URL 和可选模型列表
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>系统控制</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="btn btn-primary" onclick="saveSettings()">
+            <span>💾</span> 保存设置
+          </button>
+          <button class="btn btn-secondary" onclick="doRelogin()">重新扫码登录</button>
+          <button class="btn btn-secondary" onclick="manualHeartbeat()">心跳保活</button>
+          <span id="sessionStatus" style="font-size:12px; color:var(--text-3); margin-left:8px;"></span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+let activeTab='search',activeConvId=null,ws=null,conversations=[],currentSearchJobs=[],searchInFlight=false;
+
+function switchTab(tab){
+  activeTab=tab;
+  document.querySelectorAll('#sideNav a').forEach(a=>a.classList.toggle('active',a.dataset.tab===tab));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id==='tab-'+tab));
+  document.getElementById('pageTitle').textContent={search:'岗位搜索',applications:'投递记录',chat:'聊天',wechat:'微信记录',settings:'设置'}[tab]||'';
+  if(tab==='applications')loadApplications();
+  if(tab==='chat')loadConversations();
+  if(tab==='wechat'){loadWechatExchanges();startWechatAutoRefresh();}else{stopWechatAutoRefresh();}
+}
+document.querySelectorAll('#sideNav a').forEach(a=>a.addEventListener('click',()=>switchTab(a.dataset.tab)));
+
+document.addEventListener('click',e=>{
+  let b=e.target.closest('[data-action="apply"]');if(b){applyOne(b.dataset.url,b);return;}
+  b=e.target.closest('[data-action="skip"]');if(b)skipJob(b.dataset.id);
+});
+connectWS();loadSettings();refreshStatus();
+
+function connectWS(){
+  ws=new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws');
+  ws.onmessage=e=>{try{handleWS(JSON.parse(e.data))}catch(ex){}};
+  ws.onclose=()=>setTimeout(connectWS,3000);
+  ws.onerror=()=>ws.close();
+}
+function handleWS(msg){
+  switch(msg.type){
+    case'connected':updateStatusUI(msg.status);break;
+    case'search_complete':document.getElementById('searchStatus').innerHTML='<div style="color:var(--green);margin-top:8px;">搜索完成，找到 '+msg.found+' 条</div>';if(!searchInFlight&&currentSearchJobs.length===0)loadJobs();break;
+    case'apply_complete':
+      if(currentSearchJobs.length&&msg.job_url){currentSearchJobs=currentSearchJobs.map(j=>j.job_url===msg.job_url?{...j,status:'applied',id:msg.job_id||j.id}:j);renderJobs(currentSearchJobs);}else loadJobs();
+      refreshStatus();if(activeTab==='applications')loadApplications();document.getElementById('searchStatus').innerHTML='';break;
+    case'batch_complete':loadJobs();refreshStatus();if(activeTab==='applications')loadApplications();break;
+    case'new_messages':case'auto_reply_sent':case'manual_message_sent':
+      if(activeTab==='chat'){loadConversations().then(()=>{if(!activeConvId&&conversations.length>0)selectConversation(conversations[0].id);});}
+      if(activeConvId)loadMessages(activeConvId);break;
+    case'session_expired':document.getElementById('sessionStatus').textContent='登录已过期';break;
+    case'relogin_ok':document.getElementById('sessionStatus').textContent='登录态正常';break;
+    case'wechat_exchanged':if(activeTab==='wechat')loadWechatExchanges();break;
+    case'monitor_paused':case'monitor_resumed':case'system':refreshStatus();break;
+  }
+}
+
+function refreshStatus(){
+  fetch('/api/status').then(r=>r.json()).then(s=>{
+    updateStatusUI(s);
+    document.getElementById('statToday').textContent=s.today_applications||0;
+    document.getElementById('btnStart').disabled=s.browser_running;
+    document.getElementById('btnStop').disabled=!s.browser_running;
+  }).catch(()=>{});
+  fetch('/api/stats').then(r=>r.json()).then(renderFunnel).catch(()=>{});
+}
+function renderFunnel(d){
+  if(!d||d.today_applications===undefined)return;
+  const el=document.getElementById('funnelBar');if(!el)return;
+  el.style.display='block';
+  el.innerHTML='<div class="funnel-bar">' +
+    '<div class="funnel-item"><div class="num">'+(d.pending||0)+'</div><div class="lbl">待投递</div></div>' +
+    '<div class="funnel-item"><div class="num">'+(d.today_applications||0)+'</div><div class="lbl">已投递</div></div>' +
+    '<div class="funnel-item"><div class="num">'+(d.replied||0)+'</div><div class="lbl">HR回复</div></div>' +
+    '<div class="funnel-item"><div class="num">'+(d.interview||0)+'</div><div class="lbl">面试</div></div>' +
+    '</div>';
+}
+function updateStatusUI(s){
+  ['browserDot','monitorDot'].forEach(id=>{let d=document.getElementById(id);d.className='dot '+(s[id==='browserDot'?'browser_running':'monitor_running']?'on':'off');});
+  document.getElementById('browserStatus').textContent=s.browser_running?'运行中':'未启动';
+  document.getElementById('monitorStatus').textContent=s.monitor_running?(s.monitor_paused?'已暂停':'运行中'):'未启动';
+  let btn=document.getElementById('btnMonitorToggle');
+  if(s.monitor_running){btn.style.display='inline-block';btn.textContent=s.monitor_paused?'恢复':'暂停';}else{btn.style.display='none';}
+}
+
+function startSystem(){document.getElementById('btnStart').disabled=true;fetch('/api/system/start',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.status==='started')refreshStatus();else{alert('启动失败: '+(d.message||'未知'));document.getElementById('btnStart').disabled=false;}}).catch(()=>{document.getElementById('btnStart').disabled=false;});}
+function stopSystem(){fetch('/api/system/stop',{method:'POST'}).then(()=>refreshStatus());}
+function toggleMonitor(){
+  let btn=document.getElementById('btnMonitorToggle');
+  let isPaused=btn.textContent==='恢复';
+  let url=isPaused?'/api/monitor/resume':'/api/monitor/pause';
+  fetch(url,{method:'POST'}).then(r=>r.json()).then(()=>refreshStatus());
+}
+function doRelogin(){if(!confirm('浏览器将打开BOSS登录页，确定继续？'))return;let b=document.getElementById('btnRelogin');b.disabled=true;b.textContent='等待扫码...';document.getElementById('sessionStatus').textContent='请扫码登录';fetch('/api/system/relogin',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.textContent='重新扫码登录';document.getElementById('sessionStatus').textContent=d.status==='ok'?'登录态正常':(d.message||'失败');}).catch(()=>{b.disabled=false;b.textContent='重新扫码登录';});}
+function manualHeartbeat(){document.getElementById('sessionStatus').textContent='检测中...';fetch('/api/system/heartbeat',{method:'POST'}).then(r=>r.json()).then(d=>{document.getElementById('sessionStatus').textContent=d.alive?'登录态正常':'已过期';}).catch(()=>{document.getElementById('sessionStatus').textContent='检测失败';});}
+
+function doSearch(){
+  searchInFlight=true;
+  document.getElementById('searchStatus').innerHTML='<div class="spinner"></div> 搜索中...';
+  fetch('/api/jobs/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keyword:document.getElementById('searchKeyword').value,city:document.getElementById('searchCity').value,welfare:document.getElementById('searchWelfare').value||undefined})}).then(r=>r.json()).then(d=>{
+    searchInFlight=false;
+    if(d.detail){document.getElementById('searchStatus').innerHTML='<div style="color:var(--red);margin-top:8px;">'+esc(d.detail)+'</div>';return;}
+    if(d.jobs_found===undefined||d.jobs_found===null){document.getElementById('searchStatus').innerHTML='<div style="color:var(--red);margin-top:8px;">搜索失败</div>';return;}
+    currentSearchJobs=Array.isArray(d.jobs)?d.jobs:[];
+    document.getElementById('searchStatus').innerHTML='<div style="color:var(--green);margin-top:8px;">找到 '+d.jobs_found+' 条，已保存 '+d.saved+' 条</div>';
+    currentSearchJobs.length?renderJobs(currentSearchJobs):loadJobs();
+  }).catch(err=>{searchInFlight=false;document.getElementById('searchStatus').innerHTML='<div style="color:var(--red);margin-top:8px;">失败: '+esc(err.message)+'</div>';});
+}
+function loadJobs(){fetch('/api/jobs?limit=50').then(r=>r.json()).then(d=>{currentSearchJobs=[];renderJobs(d.jobs||[]);});}
+
+function renderJobs(jobs){
+  const grid=document.getElementById('jobsGrid');
+  if(!jobs||!jobs.length){grid.innerHTML='<div class="empty">暂无岗位</div>';document.getElementById('statPending').textContent='0';return;}
+  const sl={pending:'待投递',applied:'已投递',replied:'HR已回复',skipped:'已跳过',failed:'失败',missing_url:'缺少链接'};
+  const sb={pending:'badge-pending',applied:'badge-applied',replied:'badge-replied',skipped:'badge-skipped',failed:'badge-failed',missing_url:'badge-missing_url'};
+  grid.innerHTML=jobs.map(j=>{
+    let hasUrl=!!j.job_url,s=j.status||(hasUrl?'pending':'missing_url'),titleText=j.job_title||j.title||'未知';
+    let title=hasUrl?'<a href="'+attr(j.job_url)+'" target="_blank" rel="noopener">'+esc(titleText)+'</a>':esc(titleText);
+    let acts='';
+    if((s==='pending'||s==='failed')&&hasUrl)acts+='<button class="btn btn-xs btn-primary" data-action="apply" data-url="'+attr(j.job_url)+'">投递</button> ';
+    acts+='<button class="btn btn-xs btn-secondary" onclick="analyzeJob(\''+attr(j.job_url)+'\',\''+attr(titleText)+'\',\''+attr(j.company||'')+'\',\''+attr((j.description||'').slice(0,500))+'\')">分析</button> ';
+    acts+='<button class="btn btn-xs btn-secondary" onclick="toggleShortlist(\''+attr(j.job_url)+'\',\''+attr(titleText)+'\',\''+attr(j.company||'')+'\',\''+attr(j.salary||'')+'\',\''+attr(j.city||'')+'\',this)">收藏</button>';
+    return'<div class="job-card"><div class="title">'+title+'</div><div class="meta">'+(j.company?'<span>'+esc(j.company)+'</span>':'')+(j.salary?'<span class="salary">'+esc(j.salary)+'</span>':'')+(j.city?'<span>'+esc(j.city)+'</span>':'')+'<span class="badge '+sb[s]+'">'+sl[s]+'</span></div><div class="actions">'+acts+'</div></div>';
+  }).join('');
+  document.getElementById('statPending').textContent=jobs.filter(j=>(j.status||'pending')==='pending').length;
+}
+
+function applyOne(url,btn){
+  if(!url){alert('缺少链接');return;}
+  if(btn){btn.disabled=true;btn.textContent='投递中...';}
+  fetch('/api/jobs/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_url:url})}).then(r=>r.json()).then(d=>{
+    if(d.success){
+      if(currentSearchJobs.length){currentSearchJobs=currentSearchJobs.map(j=>j.job_url===url?{...j,status:'applied',id:d.application_id||j.id}:j);renderJobs(currentSearchJobs);}else loadJobs();
+      refreshStatus();if(activeTab==='applications')loadApplications();
+    }else{alert(d.message||'失败');if(btn){btn.disabled=false;btn.textContent='投递';}}
+  }).catch(()=>{if(btn){btn.disabled=false;btn.textContent='投递';}});
+}
+function skipJob(id){fetch('/api/jobs/'+id+'/skip',{method:'POST'}).then(()=>{if(currentSearchJobs.length){currentSearchJobs=currentSearchJobs.map(j=>String(j.id)===String(id)?{...j,status:'skipped'}:j);renderJobs(currentSearchJobs);}else loadJobs();if(activeTab==='applications')loadApplications();});}
+
+function analyzeJob(url,title,company,desc){
+  let m=document.createElement('div');m.className='analyze-modal-overlay';
+  m.innerHTML='<div style="background:var(--surface);border-radius:var(--radius-xl);padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+    '<h3 style="margin:0;font-size:18px;font-weight:700;">AI 岗位分析</h3>' +
+    '<button onclick="this.closest(\'.analyze-modal-overlay\').remove()" style="background:none;border:none;color:var(--text-3);font-size:20px;cursor:pointer;padding:4px;">&times;</button></div>' +
+    '<div id="analyzeResult"><div class="spinner"></div> 分析中...</div>' +
+    '<div style="font-size:11px;color:var(--text-3);margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">'+esc(title)+' @ '+esc(company)+'</div></div>';
+  document.body.appendChild(m);
+  fetch('/api/jobs/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_url:url,job_title:title,company:company,description:desc})}).then(r=>r.json()).then(d=>{
+    if(d.error){document.getElementById('analyzeResult').innerHTML='<div style="color:var(--red);">'+esc(d.error)+'</div>';return;}
+    let score=d.match_score||0,c=score>=80?'var(--green)':score>=60?'var(--orange)':'var(--red)';
+    document.getElementById('analyzeResult').innerHTML='<div style="text-align:center;margin-bottom:16px;"><div style="font-size:48px;font-weight:800;color:'+c+';">'+score+'%</div><div style="font-size:14px;color:var(--text-3);margin-top:4px;">匹配度</div></div>' +
+      (d.key_skills?'<div style="margin-bottom:12px;"><b style="color:var(--text-2);">关键技能:</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+d.key_skills.map(s=>'<span class="badge badge-applied">'+esc(s)+'</span>').join('')+'</div></div>':'') +
+      (d.gap?'<div style="margin-bottom:12px;"><b style="color:var(--text-2);">差距:</b><div style="margin-top:4px;color:var(--text-2);">'+esc(d.gap)+'</div></div>':'') +
+      (d.advice?'<div style="margin-bottom:12px;"><b style="color:var(--text-2);">建议:</b><div style="margin-top:4px;color:var(--text-2);">'+esc(d.advice)+'</div></div>':'') +
+      (d.summary?'<div style="color:var(--text-3);font-size:13px;line-height:1.6;">'+esc(d.summary)+'</div>':'');
+  }).catch(e=>{document.getElementById('analyzeResult').innerHTML='<div style="color:var(--red);">失败: '+e.message+'</div>';});
+}
+
+function toggleShortlist(url,title,company,salary,city,btn){
+  fetch('/api/shortlists',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_url:url,title,company,salary,city})}).then(r=>r.json()).then(d=>{
+    if(d.status==='already_exists'||d.status==='duplicate'){btn.textContent='已收藏';btn.style.opacity='.5';}else{btn.textContent='已收藏';btn.style.opacity='1';}
+  });
+}
+
+let appCurrentPage=1,appCurrentStatus='',appAllJobs=[],APP_PAGE_SIZE=15;
+function loadApplications(status){appCurrentStatus=status||'';appCurrentPage=1;fetch('/api/jobs?limit=500'+(status?'&status='+status:'')).then(r=>r.json()).then(d=>{appAllJobs=d.jobs||[];renderAppPage();});}
+function renderAppPage(){
+  let tbody=document.getElementById('appTableBody'),total=appAllJobs.length,totalPages=Math.max(1,Math.ceil(total/APP_PAGE_SIZE)),start=(appCurrentPage-1)*APP_PAGE_SIZE;
+  if(appCurrentPage>totalPages)appCurrentPage=totalPages;
+  let page=appAllJobs.slice(start,start+APP_PAGE_SIZE);
+  if(!total){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无记录</td></tr>';document.getElementById('appPagination').innerHTML='';return;}
+  let sl={pending:'待投递',applied:'已投递',replied:'已回复',skipped:'已跳过',failed:'失败'},sb={pending:'badge-pending',applied:'badge-applied',replied:'badge-replied',skipped:'badge-skipped',failed:'badge-failed'};
+  tbody.innerHTML=page.map(j=>{let s=j.status||'pending';return'<tr><td><a href="'+attr(j.job_url)+'" target="_blank">'+esc(j.job_title||j.title||'未知')+'</a></td><td>'+esc(j.company||'')+'</td><td>'+esc(j.salary||'')+'</td><td>'+esc(j.city||'')+'</td><td><span class="badge '+sb[s]+'">'+sl[s]+'</span></td><td>'+(j.job_url?'<button class="btn btn-sm btn-primary" onclick="applyOne(\''+attr(j.job_url)+'\',this)">投递</button>':'')+'</td></tr>';}).join('');
+  document.getElementById('appPagination').innerHTML='<button '+(appCurrentPage<=1?'disabled':'')+' onclick="appCurrentPage=1;renderAppPage()">«</button><button '+(appCurrentPage<=1?'disabled':'')+' onclick="appCurrentPage--;renderAppPage()">‹</button><span>'+(start+1)+'-'+Math.min(start+APP_PAGE_SIZE,total)+' / '+total+'</span><button '+(appCurrentPage>=totalPages?'disabled':'')+' onclick="appCurrentPage++;renderAppPage()">›</button><button '+(appCurrentPage>=totalPages?'disabled':'')+' onclick="appCurrentPage=totalPages;renderAppPage()">»</button>';
+}
+
+function loadShortlists(){
+  fetch('/api/shortlists').then(r=>r.json()).then(d=>{
+    let tbody=document.getElementById('appTableBody'),sl=d.shortlists||[];
+    if(!sl.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无收藏</td></tr>';return;}
+    tbody.innerHTML=sl.map(s=>'<tr><td><a href="'+attr(s.job_url)+'" target="_blank">'+esc(s.job_title)+'</a></td><td>'+esc(s.company||'')+'</td><td>'+esc(s.salary||'')+'</td><td>'+esc(s.city||'')+'</td><td><span class="badge badge-applied">收藏</span></td><td><button class="btn btn-sm btn-secondary" onclick="removeShortlist('+s.id+',this)">取消</button> <button class="btn btn-sm btn-primary" onclick="applyOne(\''+attr(s.job_url)+'\',this)">投递</button></td></tr>').join('');
+  });
+}
+function removeShortlist(id,btn){fetch('/api/shortlists/'+id,{method:'DELETE'}).then(()=>loadShortlists());}
+
+function loadConversations(){
+  return fetch('/api/conversations').then(r=>r.json()).then(d=>{
+    conversations=d.conversations||[];let list=document.getElementById('conversationList');
+    if(!conversations.length){list.innerHTML='<div class="empty" style="padding:20px;">暂无会话</div>';return;}
+    list.innerHTML=conversations.map(c=>'<div class="chat-list-item'+(activeConvId===c.id?' active':'')+'" onclick="selectConversation('+c.id+')"><div class="name">'+esc(c.hr_name||'未知')+' '+(c.unread_count>0?'<span class="unread">'+c.unread_count+'</span>':'')+'</div><div class="preview">'+esc((c.last_message_text||'').slice(0,40))+'</div><div style="font-size:10px;color:var(--text-3);margin-top:2px;">'+esc(c.hr_company||'')+' · '+esc((c.job_title||'').slice(0,15))+'</div></div>').join('');
+  });
+}
+function selectConversation(id){
+  activeConvId=id;loadConversations();loadMessages(id);
+  let conv=conversations.find(c=>c.id===id);if(!conv)return;
+  document.getElementById('chatHeader').innerHTML='<div class="info"><span class="name">'+esc(conv.hr_name||'未知')+'</span><br><span class="company">'+esc(conv.hr_company||'')+' · '+esc((conv.job_title||'').slice(0,20))+'</span></div><div style="display:flex;gap:6px;"><button class="btn btn-sm btn-secondary" id="btnAutoReplyToggle" onclick="toggleAutoReply()">'+(conv.auto_reply_enabled?'暂停AI回复':'开启AI回复')+'</button><button class="btn btn-sm btn-primary" id="btnManualSend" onclick="sendManualMessage()">发送</button></div>';
+  document.getElementById('btnManualSend').disabled=false;
+  document.getElementById('btnAutoReplyToggle').disabled=false;
+  syncConversation(id);
+}
+function loadMessages(id){fetch('/api/conversations/'+id+'/messages?limit=100').then(r=>r.json()).then(d=>renderMessages(d.messages||[]));}
+function syncConversation(id){fetch('/api/conversations/'+id+'/sync',{method:'POST'}).then(r=>r.json()).then(d=>{if(activeConvId===id&&d.messages)renderMessages(d.messages);}).catch(()=>{if(activeConvId===id)loadMessages(id);});}
+function renderMessages(msgs){
+  let pane=document.getElementById('chatMessages');
+  if(!msgs||!msgs.length){pane.innerHTML='<div class="empty">暂无消息</div>';return;}
+  let old=pane.querySelectorAll('.msg-bubble').length,isNew=msgs.length>old;
+  pane.innerHTML=msgs.map((m,i)=>{
+    let cls=m.sender==='me'?(m.ai_generated?'msg-me ai':'msg-me'):'msg-hr';
+    let c=esc(m.content).replace(/^(?:已读|未读|送达|发送失败|已发送)\s*/,'');
+    let label=m.sender==='hr'?'<div class="msg-label">HR</div>':'<div class="msg-label">我'+(m.ai_generated?' AI代发':'')+'</div>';
+    let anim=isNew&&i>=old?(m.sender==='me'?' anim-send':' anim-in'):'';
+    return'<div class="msg-bubble '+cls+anim+'">'+label+c+'</div>';
+  }).join('');
+  pane.scrollTop=pane.scrollHeight;
+}
+function sendManualMessage(){
+  if(!activeConvId)return;let input=document.getElementById('chatInput'),c=input.value.trim();if(!c)return;
+  input.value='';input.disabled=true;let btn=document.getElementById('btnManualSend');if(btn){btn.disabled=true;btn.textContent='发送中...';}
+  fetch('/api/conversations/'+activeConvId+'/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:c})}).then(r=>r.json()).then(()=>{loadMessages(activeConvId);loadConversations();}).catch(e=>{alert('失败: '+(e.message||'网络错误'));}).finally(()=>{input.disabled=false;input.focus();if(btn){btn.disabled=false;btn.textContent='发送';}});
+}
+function toggleAutoReply(){
+  if(!activeConvId)return;let conv=conversations.find(c=>c.id===activeConvId);if(!conv)return;
+  fetch('/api/conversations/'+activeConvId+'/auto-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!conv.auto_reply_enabled})}).then(r=>r.json()).then(()=>loadConversations().then(()=>selectConversation(activeConvId)));
+}
+function navigateBrowserToChat(){fetch('/api/system/navigate-chat',{method:'POST'}).catch(()=>{});}
+
+function loadWechatExchanges(){
+  fetch('/api/wechat-exchanges').then(r=>r.json()).then(d=>{
+    let el=document.getElementById('wechatExchangesList'),ex=d.exchanges||[];
+    if(!ex.length){el.innerHTML='<div class="empty">暂无微信记录</div>';return;}
+    el.innerHTML=ex.map(e=>{
+      let t=new Date(e.wechat_shared_at).toLocaleString('zh-CN'),w=e.hr_wechat||'';
+      let desc=e.job_description?'<div style="font-size:12px;color:var(--text-2);margin-bottom:12px;line-height:1.6;background:var(--bg);padding:12px;border-radius:var(--radius);border:1px solid var(--border);">'+esc(e.job_description)+'</div>':'';
+      return'<div class="hr-wechat-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+        '<div style="flex:1;">' +
+        '<div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:8px;">'+esc(e.hr_name)+'</div>' +
+        desc +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<code style="background:var(--bg);padding:8px 14px;border:1px solid var(--border);font-size:16px;color:var(--accent);display:inline-block;border-radius:var(--radius);font-weight:600;">'+w+'</code>' +
+        '<button class="btn btn-sm btn-primary" onclick="copyWechat(\''+w.replace(/'/g,"\\'")+'\',this)">复制</button></div></div>' +
+        '<div style="font-size:11px;color:var(--text-3);text-align:right;margin-left:16px;">'+esc(e.hr_company||'')+'<br>'+t+'</div></div></div>';
+    }).join('');
+  });
+}
+// 微信记录每30秒自动刷新
+let wechatRefreshTimer=null;
+function startWechatAutoRefresh(){
+  stopWechatAutoRefresh();
+  wechatRefreshTimer=setInterval(()=>{if(activeTab==='wechat')loadWechatExchanges();},30000);
+}
+function stopWechatAutoRefresh(){if(wechatRefreshTimer){clearInterval(wechatRefreshTimer);wechatRefreshTimer=null;}}
+function copyWechat(text,btn){navigator.clipboard.writeText(text).then(()=>{btn.textContent='已复制';setTimeout(()=>btn.textContent='复制',1500);});}
+
+function batchApplyAll(){
+  let pending=currentSearchJobs.filter(j=>j.job_url&&j.status!=='applied'&&j.status!=='replied');
+  if(!pending.length){alert('没有待投递的岗位，请先搜索');return;}
+  if(!confirm('确定投递 '+pending.length+' 条？'))return;
+  doBatchApply(pending.map(j=>j.job_url),'searchStatus');
+}
+async function batchApplyPending(){
+  let el=document.getElementById('applyProgress');el.innerHTML='<div class="spinner"></div> 加载中...';
+  let r=await fetch('/api/jobs?status=pending&limit=200'),d=await r.json();
+  let pending=(d.jobs||[]).filter(j=>j.job_url);
+  if(!pending.length){el.innerHTML='没有待投递岗位';return;}
+  if(!confirm('确定投递 '+pending.length+' 条？')){el.innerHTML='';return;}
+  doBatchApply(pending.map(j=>j.job_url),'applyProgress');
+}
+function doBatchApply(urls,elId){
+  let done=0,ok=0,total=urls.length,cancelled=false,el=document.getElementById(elId);
+  function up(){if(cancelled)return;let p=Math.round(done/total*100);
+    el.innerHTML='<div style="background:var(--surface);border-radius:var(--radius-lg);padding:16px;box-shadow:var(--shadow-sm);border:1px solid var(--border);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+      '<span style="font-weight:600;">投递进度</span>' +
+      '<span style="font-size:13px;color:var(--text-3);">'+done+'/'+total+' ('+ok+' 成功)</span></div>' +
+      '<div style="background:var(--bg);border-radius:8px;height:12px;overflow:hidden;">' +
+      '<div style="background:linear-gradient(90deg,var(--accent) 0%,var(--accent-light) 100%);height:100%;width:'+p+'%;transition:width .3s;border-radius:8px;"></div></div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">' +
+      '<span style="font-size:12px;color:var(--accent);font-weight:600;">'+p+'%</span>' +
+      '<button class="btn btn-xs btn-danger" onclick="cancelBatch()">取消</button></div></div>';}
+  window.cancelBatch=function(){cancelled=true;el.innerHTML='<div style="background:var(--surface);border-radius:var(--radius-lg);padding:16px;box-shadow:var(--shadow-sm);border:1px solid var(--border);color:var(--orange);">已取消: '+done+'/'+total+' ('+ok+' 成功)</div>';loadJobs();refreshStatus();if(elId==='applyProgress')loadApplications();};
+  async function next(i){if(cancelled||i>=total){if(!cancelled)el.innerHTML='<div style="background:var(--surface);border-radius:var(--radius-lg);padding:16px;box-shadow:var(--shadow-sm);border:1px solid var(--border);color:var(--green);">完成: '+ok+'/'+total+' 成功</div>';loadJobs();refreshStatus();if(elId==='applyProgress')loadApplications();return;}up();try{let r=await fetch('/api/jobs/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_url:urls[i]})}),d=await r.json();if(d.success)ok++;}catch(ex){}done++;next(i+1);}
+  next(0);
+}
+function batchSearch(){
+  let kw=document.getElementById('searchKeyword').value,cs=[];
+  let txt=document.getElementById('setSearchKeywords');if(txt&&txt.value){cs=txt.value.split('\n').filter(s=>s.trim());}
+  if(cs.length===0){doSearch();return;}
+  if(!confirm('确定搜索 '+cs.length+' 个关键词？'))return;
+  (async()=>{for(let k of cs){document.getElementById('searchKeyword').value=k;await new Promise(r=>{doSearch();let t=setInterval(()=>{if(!searchInFlight){clearInterval(t);setTimeout(r,200);}},300);});}})();
+}
+
+function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'):'';}
+function attr(s){return s?s.replace(/'/g,"&#39;"):'';}
+function setVal(id,v){let el=document.getElementById(id);if(el)el.value=v;}
+
+function loadSettings(){
+  fetch('/api/settings').then(r=>r.json()).then(d=>{
+    let s=d.settings||{};
+    setVal('setGreeting',s.greeting_template||'');
+    setVal('setStyle',s.ai_reply_style||'professional');
+    setVal('setDailyLimit',s.daily_apply_limit||'15');
+    setVal('setMinDelay',s.min_reply_delay_sec||'30');
+    setVal('setMaxDelay',s.max_reply_delay_sec||'120');
+    setVal('setResume',s.resume_summary||'');
+    setVal('setWechat',s.wechat_id||'');
+    setVal('setSearchKeywords',(s.search_keywords||'').replace(/,/g,'\n'));
+    setVal('setAutoReply',s.auto_reply_enabled||'true');
+    setVal('setAIBaseUrl',s.ai_base_url||'');
+    setVal('setAIModel',s.ai_model||'');
+    if(s.ai_key_configured==='true'){document.getElementById('setAIApiKey').placeholder='已配置';document.getElementById('aiKeyStatus').innerHTML='<span style="color:var(--green);">已配置</span>';}
+    else{document.getElementById('aiKeyStatus').innerHTML='<span style="color:var(--orange);">未配置</span>';}
+  });
+}
+function saveSettings(){
+  let data={greeting_template:document.getElementById('setGreeting').value,ai_reply_style:document.getElementById('setStyle').value,daily_apply_limit:document.getElementById('setDailyLimit').value,min_reply_delay_sec:document.getElementById('setMinDelay').value,max_reply_delay_sec:document.getElementById('setMaxDelay').value,resume_summary:document.getElementById('setResume').value,wechat_id:document.getElementById('setWechat').value,search_keywords:document.getElementById('setSearchKeywords').value.replace(/\n/g,','),auto_reply_enabled:document.getElementById('setAutoReply').value,ai_base_url:document.getElementById('setAIBaseUrl').value,ai_model:document.getElementById('setAIModel').value};
+  let key=document.getElementById('setAIApiKey').value;if(key)data.ai_api_key=key;
+  fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(r=>r.json()).then(()=>{
+    alert('设置已保存');
+    if(key){document.getElementById('aiKeyStatus').innerHTML='<span style="color:var(--green);">已配置</span>';document.getElementById('setAIApiKey').placeholder='已配置';document.getElementById('setAIApiKey').value='';}
+    refreshStatus();
+  });
+}
+const PLATFORMS={deepseek:{baseUrl:'https://api.deepseek.com/v1',models:[{v:'deepseek-v4-pro',t:'DeepSeek V4 Pro'},{v:'deepseek-chat',t:'DeepSeek Chat'},{v:'deepseek-reasoner',t:'DeepSeek Reasoner'}]},openrouter:{baseUrl:'https://openrouter.ai/api/v1',models:[{v:'openrouter/auto',t:'Auto'},{v:'deepseek/deepseek-chat',t:'DeepSeek Chat'},{v:'deepseek/deepseek-r1',t:'DeepSeek R1'},{v:'anthropic/claude-sonnet-4',t:'Claude Sonnet 4'},{v:'google/gemini-2.5-flash',t:'Gemini 2.5 Flash'}]},mimo:{baseUrl:'https://token-plan-sgp.xiaomimimo.com/v1',models:[{v:'mi-undefined',t:'MiMo'}]},custom:{baseUrl:'',models:[]}};
+function onPlatformChange(){
+  let plat=document.getElementById('setAIPlatform').value,cfg=PLATFORMS[plat];if(!cfg)return;
+  document.getElementById('setAIBaseUrl').value=cfg.baseUrl;
+  let dl=document.getElementById('modelList'),input=document.getElementById('setAIModel');
+  dl.innerHTML='';
+  if(cfg.models.length){cfg.models.forEach(m=>dl.innerHTML+='<option value="'+m.v+'">'+m.t+'</option>');input.value=cfg.models[0].v;input.placeholder='选择或输入模型名';}
+  else{input.value='';input.placeholder='输入模型名...';}
+}
+</script>
+</body>
+</html>

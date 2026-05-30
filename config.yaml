@@ -1,0 +1,19 @@
+# AI Job Radar 配置
+output_dir: ./reports
+database:
+  type: mysql  # 或 sqlite
+  host: localhost
+  user: root
+  password: ${DB_PASSWORD}  # 支持环境变量 DB_PASSWORD 或 MYSQL_PWD
+  database: ai_jobs_db
+filters:
+  salary_min: 15
+  salary_max: 25
+  experience_min: 1
+  experience_max: 3
+  education: bachelor  # bachelor: 本科及以上, any: 不限
+keywords:
+  - AI应用开发
+  - 人工智能工程师
+  - 算法工程师
+  - 大模型开发

@@ -1,0 +1,111 @@
+{
+  "name": "bosshelper",
+  "version": "0.1.0",
+  "description": "BOSS直聘求职自动化工具 - 搜索/投递/AI聊天/微信交换",
+  "server": "http://127.0.0.1:8010",
+  "commands": [
+    {
+      "name": "search",
+      "description": "搜索BOSS直聘岗位。返回岗位列表含薪资/公司/城市/经验要求等。",
+      "cli": "bosshelper search <keyword> --city <城市> [--welfare <福利>] [--count <数量>]",
+      "endpoint": "POST /api/jobs/search",
+      "params": {
+        "keyword": { "type": "string", "required": true, "description": "搜索关键词如 AI Agent / Golang 等" },
+        "city": { "type": "string", "required": true, "description": "城市名如 北京/广州/全国" },
+        "welfare": { "type": "string", "required": false, "description": "福利筛选 逗号分隔 如 双休,五险一金" },
+        "limit": { "type": "integer", "required": false, "default": 60, "description": "返回数量上限" }
+      }
+    },
+    {
+      "name": "status",
+      "description": "查看浏览器状态和今日统计。",
+      "cli": "bosshelper status",
+      "endpoint": "GET /api/status"
+    },
+    {
+      "name": "stats",
+      "description": "投递转化漏斗统计：搜索→待投递→已投递→HR回复→面试。",
+      "cli": "bosshelper stats",
+      "endpoint": "GET /api/stats"
+    },
+    {
+      "name": "jobs",
+      "description": "列出本地数据库中的岗位。",
+      "cli": "bosshelper jobs [--status pending|applied|replied] [--limit 50]",
+      "endpoint": "GET /api/jobs",
+      "params": {
+        "status": { "type": "string", "required": false, "enum": ["pending", "applied", "replied"], "description": "岗位状态筛选" },
+        "limit": { "type": "integer", "required": false, "default": 50 }
+      }
+    },
+    {
+      "name": "apply",
+      "description": "投递单个岗位。",
+      "cli": "bosshelper apply <job_url>",
+      "endpoint": "POST /api/jobs/apply",
+      "params": {
+        "job_url": { "type": "string", "required": true, "description": "岗位URL" }
+      }
+    },
+    {
+      "name": "apply-batch",
+      "description": "批量投递待投递岗位。",
+      "cli": "bosshelper apply-batch [--status pending]",
+      "endpoint": "POST /api/jobs/apply-batch"
+    },
+    {
+      "name": "conversations",
+      "description": "列出所有HR会话。",
+      "cli": "bosshelper conversations",
+      "endpoint": "GET /api/conversations"
+    },
+    {
+      "name": "chat",
+      "description": "查看与某HR的聊天记录。",
+      "cli": "bosshelper chat <conv_id>",
+      "endpoint": "GET /api/conversations/{conv_id}/messages",
+      "params": {
+        "conv_id": { "type": "integer", "required": true, "description": "会话ID" }
+      }
+    },
+    {
+      "name": "send",
+      "description": "向HR手动发送消息。",
+      "cli": "bosshelper send <conv_id> --msg <消息内容>",
+      "endpoint": "POST /api/conversations/{conv_id}/send",
+      "params": {
+        "conv_id": { "type": "integer", "required": true },
+        "msg": { "type": "string", "required": true, "description": "消息内容" }
+      }
+    },
+    {
+      "name": "doctor",
+      "description": "诊断环境：Python版本、浏览器状态、登录态、AI配置等。",
+      "cli": "bosshelper doctor",
+      "endpoint": "GET /api/doctor"
+    },
+    {
+      "name": "login",
+      "description": "重新扫码登录BOSS直聘。",
+      "cli": "bosshelper login",
+      "endpoint": "POST /api/system/relogin"
+    },
+    {
+      "name": "server",
+      "description": "管理后台服务（启动/停止/状态）。",
+      "cli": "bosshelper server [--start|--stop] [--port 8010]"
+    }
+  ],
+  "output_format": {
+    "type": "JSON envelope",
+    "fields": {
+      "ok": "boolean - 操作是否成功",
+      "command": "string - 执行的命令名",
+      "data": "object|array|null - 返回数据",
+      "error": "string|null - 错误信息",
+      "pagination": "object - 分页信息 (搜索等)",
+      "hints": "object - 后续操作提示"
+    }
+  },
+  "agent_instructions": "当用户要求搜索职位、投递岗位、查看聊天等BOSS直聘操作时：1. 先运行 bosshelper status 检查状态 2. 如需登录运行 bosshelper login 3. 根据意图调用对应命令 4. 解析返回JSON中的 ok 字段判断成败"
+}

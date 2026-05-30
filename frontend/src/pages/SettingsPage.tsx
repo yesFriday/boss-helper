@@ -1,0 +1,333 @@
+import { useState, useEffect } from 'react'
+import { Save, RefreshCw, Heart } from 'lucide-react'
+import { useSettingsStore } from '../stores/settingsStore'
+import { useSystemStore } from '../stores/systemStore'
+import { useNotificationStore } from '../stores/notificationStore'
+import { settingsApi } from '../api/settings'
+import { systemApi } from '../api/system'
+import { AI_PLATFORMS } from '../lib/constants'
+
+export function SettingsPage() {
+  const { aiKeyConfigured } = useSettingsStore()
+  const { sessionStatus } = useSystemStore()
+  const { addToast } = useNotificationStore()
+  const [formData, setFormData] = useState({
+    greeting_template: '',
+    ai_reply_style: 'professional',
+    daily_apply_limit: '15',
+    min_reply_delay_sec: '30',
+    max_reply_delay_sec: '120',
+    resume_summary: '',
+    wechat_id: '',
+    search_keywords: '',
+    auto_reply_enabled: 'true',
+    ai_platform: '',
+    ai_api_key: '',
+    ai_base_url: '',
+    ai_model: '',
+  })
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  const loadSettings = async () => {
+    try {
+      const res = await settingsApi.getSettings()
+      const s = res.settings || {}
+      setFormData({
+        greeting_template: s.greeting_template || '',
+        ai_reply_style: s.ai_reply_style || 'professional',
+        daily_apply_limit: s.daily_apply_limit || '15',
+        min_reply_delay_sec: s.min_reply_delay_sec || '30',
+        max_reply_delay_sec: s.max_reply_delay_sec || '120',
+        resume_summary: s.resume_summary || '',
+        wechat_id: s.wechat_id || '',
+        search_keywords: (s.search_keywords || '').replace(/,/g, '\n'),
+        auto_reply_enabled: s.auto_reply_enabled || 'true',
+        ai_platform: '',
+        ai_api_key: '',
+        ai_base_url: s.ai_base_url || '',
+        ai_model: s.ai_model || '',
+      })
+      useSettingsStore.getState().setAiKeyConfigured(s.ai_key_configured === 'true')
+    } catch {}
+  }
+
+  const handleSave = async () => {
+    try {
+      await settingsApi.updateSettings({
+        greeting_template: formData.greeting_template,
+        ai_reply_style: formData.ai_reply_style,
+        daily_apply_limit: formData.daily_apply_limit,
+        min_reply_delay_sec: formData.min_reply_delay_sec,
+        max_reply_delay_sec: formData.max_reply_delay_sec,
+        resume_summary: formData.resume_summary,
+        wechat_id: formData.wechat_id,
+        search_keywords: formData.search_keywords.replace(/\n/g, ','),
+        auto_reply_enabled: formData.auto_reply_enabled,
+        ai_base_url: formData.ai_base_url,
+        ai_model: formData.ai_model,
+        ...(formData.ai_api_key ? { ai_api_key: formData.ai_api_key } : {}),
+      })
+      addToast('设置已保存', 'success')
+      if (formData.ai_api_key) {
+        useSettingsStore.getState().setAiKeyConfigured(true)
+        setFormData((prev) => ({ ...prev, ai_api_key: '' }))
+      }
+    } catch {
+      addToast('保存失败', 'error')
+    }
+  }
+
+  const handleRelogin = async () => {
+    if (!confirm('浏览器将打开BOSS登录页，确定继续？')) return
+    useSystemStore.getState().setSessionStatus('checking')
+    try {
+      const res = await systemApi.relogin()
+      useSystemStore.getState().setSessionStatus(res.status === 'ok' ? 'ok' : 'expired')
+      addToast(res.status === 'ok' ? '登录成功' : res.message || '失败', res.status === 'ok' ? 'success' : 'error')
+    } catch {
+      useSystemStore.getState().setSessionStatus('')
+      addToast('操作失败', 'error')
+    }
+  }
+
+  const handleHeartbeat = async () => {
+    useSystemStore.getState().setSessionStatus('checking')
+    try {
+      const res = await systemApi.heartbeat()
+      useSystemStore.getState().setSessionStatus(res.alive ? 'ok' : 'expired')
+    } catch {
+      useSystemStore.getState().setSessionStatus('')
+    }
+  }
+
+  const handlePlatformChange = (platform: string) => {
+    const cfg = AI_PLATFORMS[platform]
+    if (!cfg) return
+    setFormData((prev) => ({
+      ...prev,
+      ai_platform: platform,
+      ai_base_url: cfg.baseUrl,
+      ai_model: cfg.models[0]?.v || '',
+    }))
+  }
+
+  return (
+    <div className="animate-slide-in space-y-5">
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">招呼语设置</h3>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">招呼语模板</label>
+            <textarea
+              value={formData.greeting_template}
+              onChange={(e) => setFormData((prev) => ({ ...prev, greeting_template: e.target.value }))}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all min-h-[60px] resize-y"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">AI回复风格</label>
+            <select
+              value={formData.ai_reply_style}
+              onChange={(e) => setFormData((prev) => ({ ...prev, ai_reply_style: e.target.value }))}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="professional">专业</option>
+              <option value="casual">轻松</option>
+              <option value="enthusiastic">热情</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">频率限制</h3>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">每日投递上限</label>
+            <input
+              type="number"
+              value={formData.daily_apply_limit}
+              onChange={(e) => setFormData((prev) => ({ ...prev, daily_apply_limit: e.target.value }))}
+              min={1}
+              max={30}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">回复间隔(秒)</label>
+            <div className="flex-1 flex items-center gap-3">
+              <input
+                type="number"
+                value={formData.min_reply_delay_sec}
+                onChange={(e) => setFormData((prev) => ({ ...prev, min_reply_delay_sec: e.target.value }))}
+                min={10}
+                max={300}
+                className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              />
+              <span className="text-slate-400 font-semibold">—</span>
+              <input
+                type="number"
+                value={formData.max_reply_delay_sec}
+                onChange={(e) => setFormData((prev) => ({ ...prev, max_reply_delay_sec: e.target.value }))}
+                min={20}
+                max={600}
+                className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">个人资料</h3>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">微信号</label>
+            <input
+              type="text"
+              value={formData.wechat_id}
+              onChange={(e) => setFormData((prev) => ({ ...prev, wechat_id: e.target.value }))}
+              placeholder="AI会引导HR添加"
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">简历摘要</label>
+            <textarea
+              value={formData.resume_summary}
+              onChange={(e) => setFormData((prev) => ({ ...prev, resume_summary: e.target.value }))}
+              placeholder="技能、项目经验..."
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all min-h-[60px] resize-y"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">搜索关键词</h3>
+        <div className="flex items-start gap-3">
+          <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0 pt-2">关键词</label>
+          <textarea
+            value={formData.search_keywords}
+            onChange={(e) => setFormData((prev) => ({ ...prev, search_keywords: e.target.value }))}
+            placeholder="AI Agent&#10;大模型开发&#10;AI产品经理&#10;RAG开发"
+            rows={5}
+            className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all min-h-[80px] resize-y"
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">AI模型配置</h3>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">平台</label>
+            <select
+              value={formData.ai_platform}
+              onChange={(e) => handlePlatformChange(e.target.value)}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">-- 选择平台 --</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="mimo">小米MiMo</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">API Key</label>
+            <div className="flex-1 flex items-center gap-2">
+              <input
+                type="password"
+                value={formData.ai_api_key}
+                onChange={(e) => setFormData((prev) => ({ ...prev, ai_api_key: e.target.value }))}
+                placeholder="输入API Key"
+                className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              />
+              <span className="text-xs">
+                {aiKeyConfigured ? (
+                  <span className="text-emerald-500 font-semibold">已配置</span>
+                ) : (
+                  <span className="text-amber-500 font-semibold">未配置</span>
+                )}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">Base URL</label>
+            <input
+              type="text"
+              value={formData.ai_base_url}
+              onChange={(e) => setFormData((prev) => ({ ...prev, ai_base_url: e.target.value }))}
+              placeholder="自动填充"
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">模型</label>
+            <input
+              type="text"
+              value={formData.ai_model}
+              onChange={(e) => setFormData((prev) => ({ ...prev, ai_model: e.target.value }))}
+              placeholder="选择或输入模型名"
+              list="modelList"
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            />
+            <datalist id="modelList">
+              {formData.ai_platform && AI_PLATFORMS[formData.ai_platform]?.models.map((m) => (
+                <option key={m.v} value={m.v}>{m.t}</option>
+              ))}
+            </datalist>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">自动回复</label>
+            <select
+              value={formData.auto_reply_enabled}
+              onChange={(e) => setFormData((prev) => ({ ...prev, auto_reply_enabled: e.target.value }))}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="true">开启</option>
+              <option value="false">关闭</option>
+            </select>
+          </div>
+          <div className="text-xs text-slate-400 pl-32">选择平台后自动填充 Base URL 和可选模型列表</div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">系统控制</h3>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={handleSave}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
+          >
+            <Save size={16} />
+            保存设置
+          </button>
+          <button
+            onClick={handleRelogin}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            <RefreshCw size={14} />
+            重新扫码登录
+          </button>
+          <button
+            onClick={handleHeartbeat}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            <Heart size={14} />
+            心跳保活
+          </button>
+          {sessionStatus && (
+            <span className="text-xs text-slate-400 ml-2">
+              {sessionStatus === 'ok' ? '登录态正常' : sessionStatus === 'expired' ? '已过期' : sessionStatus === 'checking' ? '检测中...' : ''}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
