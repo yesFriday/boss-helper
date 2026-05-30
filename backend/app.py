@@ -1051,6 +1051,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "status": {
                     "browser_running": automation is not None,
                     "monitor_running": monitor_task is not None and not monitor_task.done(),
+                    "monitor_paused": monitor_paused,
                 },
             }
         )
