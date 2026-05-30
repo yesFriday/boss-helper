@@ -645,6 +645,52 @@ class BossScraper:
                 filtered.append(j)
         return filtered
 
+    def _filter_by_expect(self, jobs, salary_expect=None, experience_expect=None):
+        """按期望薪资和工作年限过滤（闭区间判断）。
+        salary_expect: 用户期望薪资(K)，判断是否在岗位薪资 [min, max] 内
+        experience_expect: 用户工作年限(年)，判断是否在岗位经验 [min, max] 内
+        """
+        if salary_expect is None and experience_expect is None:
+            return jobs
+        filtered = []
+        for j in jobs:
+            # 薪资过滤
+            if salary_expect is not None:
+                salary_text = j.get("salary", "") or ""
+                nums = re.findall(r"(\d+)", salary_text)
+                if len(nums) >= 2:
+                    lo, hi = int(nums[0]), int(nums[1])
+                    # 处理 "1-2K" 这种小数字情况
+                    if lo < 5 and hi < 20:
+                        lo *= 10
+                        hi *= 10
+                    if not (lo <= salary_expect <= hi):
+                        continue
+                elif len(nums) == 1:
+                    val = int(nums[0])
+                    if val < 5:
+                        val *= 10
+                    if val != salary_expect:
+                        continue
+                else:
+                    continue
+            # 经验过滤
+            if experience_expect is not None:
+                exp_text = j.get("experience", "") or ""
+                nums = re.findall(r"(\d+)", exp_text)
+                if len(nums) >= 2:
+                    lo, hi = int(nums[0]), int(nums[1])
+                    if not (lo <= experience_expect <= hi):
+                        continue
+                elif len(nums) == 1:
+                    val = int(nums[0])
+                    if val != experience_expect:
+                        continue
+                else:
+                    continue
+            filtered.append(j)
+        return filtered
+
     def _extract_job_cards(self):
         """优先从岗位卡片 DOM 提取，避免正文行号变化导致链接和岗位错配。"""
         try:

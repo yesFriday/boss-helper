@@ -251,6 +251,8 @@ class SearchRequest(BaseModel):
     keyword: str = "AI Agent"
     city: str = "淄博"
     welfare: Optional[str] = None  # 福利筛选 如 "双休,五险一金"
+    salary_expect: Optional[int] = None  # 期望薪资(K)，闭区间判断
+    experience_expect: Optional[int] = None  # 工作年限(年)，闭区间判断
     limit: int = 60
 
 
@@ -640,6 +642,10 @@ async def search_jobs(req: SearchRequest):
         if req.welfare:
             welfare_kw = [w.strip() for w in req.welfare.split(",") if w.strip()]
             jobs = automation._filter_by_welfare(jobs, welfare_kw)
+
+        # 薪资和经验筛选
+        if req.salary_expect is not None or req.experience_expect is not None:
+            jobs = automation._filter_by_expect(jobs, req.salary_expect, req.experience_expect)
 
         saved_ids = []
         result_jobs = []

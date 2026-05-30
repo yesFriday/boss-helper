@@ -3,7 +3,7 @@ import { Search, Zap, Send } from 'lucide-react'
 import { CITY_GROUPS } from '../../lib/constants'
 
 interface SearchBarProps {
-  onSearch: (keyword: string, city: string, welfare?: string) => void
+  onSearch: (keyword: string, city: string, welfare?: string, salaryExpect?: number, experienceExpect?: number) => void
   onBatchSearch: () => void
   onBatchApply: () => void
   loading: boolean
@@ -13,9 +13,17 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
   const [keyword, setKeyword] = useState('AI Agent')
   const [city, setCity] = useState('淄博')
   const [welfare, setWelfare] = useState('')
+  const [salaryExpect, setSalaryExpect] = useState('')
+  const [experienceExpect, setExperienceExpect] = useState('')
 
   const handleSearch = () => {
-    onSearch(keyword, city, welfare || undefined)
+    onSearch(
+      keyword,
+      city,
+      welfare || undefined,
+      salaryExpect ? Number(salaryExpect) : undefined,
+      experienceExpect ? Number(experienceExpect) : undefined,
+    )
   }
 
   return (
@@ -47,6 +55,22 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
         onChange={(e) => setWelfare(e.target.value)}
         placeholder="福利:双休,五险一金"
         className="w-40 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+      />
+      <input
+        type="number"
+        min="0"
+        value={salaryExpect}
+        onChange={(e) => setSalaryExpect(e.target.value)}
+        placeholder="期望薪资(K)"
+        className="w-28 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+      />
+      <input
+        type="number"
+        min="0"
+        value={experienceExpect}
+        onChange={(e) => setExperienceExpect(e.target.value)}
+        placeholder="工作年限(年)"
+        className="w-28 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
       />
       <button
         onClick={handleSearch}
