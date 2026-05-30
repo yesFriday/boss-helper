@@ -1290,9 +1290,10 @@ function startSystem(){document.getElementById('btnStart').disabled=true;fetch('
 function stopSystem(){fetch('/api/system/stop',{method:'POST'}).then(()=>refreshStatus());}
 function toggleMonitor(){
   let btn=document.getElementById('btnMonitorToggle');
-  let isPaused=btn.textContent==='恢复';
+  let isPaused=btn.textContent.trim()==='恢复';
   let url=isPaused?'/api/monitor/resume':'/api/monitor/pause';
-  fetch(url,{method:'POST'}).then(r=>r.json()).then(()=>refreshStatus());
+  btn.disabled=true;
+  fetch(url,{method:'POST'}).then(r=>r.json()).then(()=>{btn.disabled=false;refreshStatus();}).catch(()=>{btn.disabled=false;});
 }
 function doRelogin(){if(!confirm('浏览器将打开BOSS登录页，确定继续？'))return;let b=document.getElementById('btnRelogin');b.disabled=true;b.textContent='等待扫码...';document.getElementById('sessionStatus').textContent='请扫码登录';fetch('/api/system/relogin',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.textContent='重新扫码登录';document.getElementById('sessionStatus').textContent=d.status==='ok'?'登录态正常':(d.message||'失败');}).catch(()=>{b.disabled=false;b.textContent='重新扫码登录';});}
 function manualHeartbeat(){document.getElementById('sessionStatus').textContent='检测中...';fetch('/api/system/heartbeat',{method:'POST'}).then(r=>r.json()).then(d=>{document.getElementById('sessionStatus').textContent=d.alive?'登录态正常':'已过期';}).catch(()=>{document.getElementById('sessionStatus').textContent='检测失败';});}
