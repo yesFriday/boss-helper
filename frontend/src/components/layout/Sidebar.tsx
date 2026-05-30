@@ -1,4 +1,4 @@
-import { Search, ClipboardList, MessageSquare, Smartphone, Settings, Play, Pause } from 'lucide-react'
+import { Search, ClipboardList, MessageSquare, Smartphone, Settings } from 'lucide-react'
 import { useAppStore, type TabType } from '../../stores/appStore'
 import { useSystemStore } from '../../stores/systemStore'
 import { cn } from '../../lib/cn'
@@ -74,7 +74,7 @@ export function Sidebar() {
                   : 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30'
               )}
             >
-              {monitorPaused ? <Play size={12} /> : <Pause size={12} />}
+              {monitorPaused ? '▶' : '⏸'}
               {monitorPaused ? '恢复' : '暂停'}
             </button>
           )}
