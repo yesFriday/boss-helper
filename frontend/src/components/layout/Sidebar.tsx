@@ -1,4 +1,4 @@
-import { Search, ClipboardList, MessageSquare, Smartphone, Settings } from 'lucide-react'
+import { Search, ClipboardList, MessageSquare, Smartphone, Settings, Play, Pause } from 'lucide-react'
 import { useAppStore, type TabType } from '../../stores/appStore'
 import { useSystemStore } from '../../stores/systemStore'
 import { cn } from '../../lib/cn'
@@ -13,7 +13,7 @@ const navItems: { tab: TabType; icon: React.ReactNode; label: string }[] = [
 
 export function Sidebar() {
   const { activeTab, setActiveTab } = useAppStore()
-  const { browserRunning, monitorRunning, monitorPaused } = useSystemStore()
+  const { browserRunning, monitorRunning, monitorPaused, toggleMonitor } = useSystemStore()
 
   return (
     <aside className="w-60 flex-shrink-0 bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col py-5 shadow-xl z-10">
@@ -50,18 +50,34 @@ export function Sidebar() {
           />
           <span>浏览器 {browserRunning ? '运行中' : '未启动'}</span>
         </div>
-        <div className="flex items-center gap-2.5 text-xs text-slate-300">
-          <span
-            className={cn(
-              'w-2 h-2 rounded-full',
-              monitorRunning
-                ? monitorPaused
-                  ? 'bg-yellow-400 shadow-[0_0_6px_#f59e0b]'
-                  : 'bg-emerald-400 shadow-[0_0_6px_#10b981]'
-                : 'bg-slate-500'
-            )}
-          />
-          <span>监控 {monitorRunning ? (monitorPaused ? '已暂停' : '运行中') : '未启动'}</span>
+        <div className="flex items-center justify-between text-xs text-slate-300">
+          <div className="flex items-center gap-2.5">
+            <span
+              className={cn(
+                'w-2 h-2 rounded-full',
+                monitorRunning
+                  ? monitorPaused
+                    ? 'bg-yellow-400 shadow-[0_0_6px_#f59e0b]'
+                    : 'bg-emerald-400 shadow-[0_0_6px_#10b981]'
+                  : 'bg-slate-500'
+              )}
+            />
+            <span>监控 {monitorRunning ? (monitorPaused ? '已暂停' : '运行中') : '未启动'}</span>
+          </div>
+          {monitorRunning && (
+            <button
+              onClick={toggleMonitor}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all duration-200 cursor-pointer',
+                monitorPaused
+                  ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                  : 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30'
+              )}
+            >
+              {monitorPaused ? <Play size={12} /> : <Pause size={12} />}
+              {monitorPaused ? '恢复' : '暂停'}
+            </button>
+          )}
         </div>
       </div>
     </aside>
