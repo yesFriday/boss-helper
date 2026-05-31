@@ -1,10 +1,11 @@
-import { Search, ClipboardList, MessageSquare, Smartphone, Settings } from 'lucide-react'
+import { Search, ClipboardList, MessageSquare, Smartphone, Clock, Settings } from 'lucide-react'
 import { useAppStore, type TabType } from '../../stores/appStore'
 import { useSystemStore } from '../../stores/systemStore'
 import { cn } from '../../lib/cn'
 
 const navItems: { tab: TabType; icon: React.ReactNode; label: string }[] = [
   { tab: 'search', icon: <Search size={18} />, label: '岗位搜索' },
+  { tab: 'automation', icon: <Clock size={18} />, label: '交给AI' },
   { tab: 'applications', icon: <ClipboardList size={18} />, label: '投递记录' },
   { tab: 'chat', icon: <MessageSquare size={18} />, label: '聊天' },
   { tab: 'wechat', icon: <Smartphone size={18} />, label: '微信记录' },

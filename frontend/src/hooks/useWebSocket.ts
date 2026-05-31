@@ -4,6 +4,7 @@ import { useSystemStore } from '../stores/systemStore'
 import { useJobsStore } from '../stores/jobsStore'
 import { useChatStore } from '../stores/chatStore'
 import { useNotificationStore } from '../stores/notificationStore'
+import { useSchedulerStore } from '../stores/schedulerStore'
 import { systemApi } from '../api/system'
 import { jobsApi } from '../api/jobs'
 import { conversationsApi } from '../api/conversations'
@@ -74,6 +75,18 @@ export function useWebSocket() {
       case 'system': {
         const status = await systemApi.getStatus()
         useSystemStore.getState().updateFromStatus(status)
+        break
+      }
+      case 'scheduler_tick': {
+        if (msg.log) {
+          useSchedulerStore.getState().addExecutionLog(msg.log as { time: string; tasks: string[] })
+        }
+        break
+      }
+      case 'scheduler_config_updated': {
+        if (msg.config) {
+          useSchedulerStore.getState().setConfig(msg.config as any)
+        }
         break
       }
     }

@@ -29,6 +29,9 @@ import yaml
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
+from backend.logger import get_logger
+log = get_logger("scraper")
+
 # ============================================================
 # 默认值
 # ============================================================
@@ -173,15 +176,15 @@ def scrape_zhaopin(keyword="AI应用开发", max_jobs=50):
                                 all_jobs.append(job)
                         except:
                             continue
-                    print(f"  [智联] 关键词'{keyword}' 第{page_num}页: {len(cards)}个")
+                    log.info("智联 关键词'%s' 第%d页: %d个", keyword, page_num, len(cards))
                 else:
-                    print(f"  [智联] 关键词'{keyword}' 第{page_num}页: 没有找到岗位卡片")
+                    log.warning("智联 关键词'%s' 第%d页: 没有找到岗位卡片", keyword, page_num)
             
             context.close()
             browser.close()
             
     except Exception as e:
-        print(f"  [智联] 爬失败了: {e}", file=sys.stderr)
+        log.error("智联 爬失败了: %s", e, exc_info=True)
     
     return all_jobs
 
@@ -459,16 +462,16 @@ def main():
     cfg = load_config()
     
     kw_list = cfg["keywords"]
-    print(f"搜: {', '.join(kw_list)}")
-    print(f"筛: 薪资{cfg['salary_min']}K-{cfg['salary_max']}K, "
-          f"经验{cfg['exp_min']}-{cfg['exp_max']}年, "
-          f"学历{'本科及以上' if cfg['education']=='bachelor' else '不限'}")
-    print(f"日报放: {cfg['output_dir']}")
+    log.info("搜: %s", ", ".join(kw_list))
+    log.info("筛: 薪资%dK-%dK, 经验%d-%d年, 学历%s",
+             cfg['salary_min'], cfg['salary_max'],
+             cfg['exp_min'], cfg['exp_max'],
+             '本科及以上' if cfg['education'] == 'bachelor' else '不限')
+    log.info("日报放: %s", cfg['output_dir'])
     if cfg["no_db"]:
-        print("数据库: 跳过")
+        log.info("数据库: 跳过")
     else:
-        print(f"数据库: mysql://{cfg['db_host']}/{cfg['db_name']}")
-    print()
+        log.info("数据库: mysql://%s/%s", cfg['db_host'], cfg['db_name'])
     
     os.makedirs(cfg["output_dir"], exist_ok=True)
     
@@ -511,17 +514,17 @@ def main():
     filtered = filtered[:100]
     
     if not filtered:
-        print("一条都没捞到，可能是网站改版了或者关键词没匹配上")
+        log.warning("一条都没捞到，可能是网站改版了或者关键词没匹配上")
         return
     
-    print(f"\n搞定 {len(filtered)} 条\n")
+    log.info("搞定 %d 条", len(filtered))
     
     # 出日报
     md = render_md(filtered, cfg)
     md_path = os.path.join(cfg["output_dir"], f"招聘日报_{DATE_STR}.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md)
-    print(f"日报: {md_path}")
+    log.info("日报: %s", md_path)
     
     # 存库
     if not cfg["no_db"]:
@@ -529,15 +532,15 @@ def main():
             clean_db(cfg)
             save_to_db(filtered, cfg)
             save_summary(filtered, cfg)
-            print("已存 MySQL")
+            log.info("已存 MySQL")
         except Exception as e:
-            print(f"存 MySQL 失败了（不影响日报）: {e}")
+            log.error("存 MySQL 失败了（不影响日报）: %s", e, exc_info=True)
     
     # 打出来看看
-    print(f"\n{'─'*50}")
+    log.debug("%s", "─" * 50)
     for j in filtered:
-        print(f"  {j['title'][:25]:25s} | {str(j['company'])[:15]:15s} | {j['salary']}")
-    print(f"{'─'*50}")
+        log.debug("  %s | %s | %s", j['title'][:25], str(j['company'])[:15], j['salary'])
+    log.debug("%s", "─" * 50)
 
 
 if __name__ == "__main__":

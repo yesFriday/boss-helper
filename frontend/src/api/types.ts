@@ -73,6 +73,8 @@ export interface Settings {
   daily_apply_limit: string
   min_reply_delay_sec: string
   max_reply_delay_sec: string
+  batch_delay_min_sec: string
+  batch_delay_max_sec: string
   resume_summary: string
   wechat_id: string
   search_keywords: string

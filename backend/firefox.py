@@ -28,6 +28,10 @@ from urllib.parse import quote_plus
 
 from playwright.sync_api import sync_playwright
 
+from backend.logger import get_logger
+
+log = get_logger("firefox")
+
 # Windows 编码修复
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
@@ -520,7 +524,7 @@ class BossScraper:
         self.page.goto("https://www.zhipin.com/web/user/?ka=header-login")
         pause(2, 4)
         self.page.bring_to_front()
-        print("\n🔓 浏览器已打开，请扫码登录")
+        log.info("浏览器已打开，请扫码登录")
         last = self.page.url
         logged_in = False
         for i in range(600):
@@ -533,30 +537,30 @@ class BossScraper:
                 any(p in url for p in ["/web/geek", "/web/geek/chat", "/job_detail"])
                 and not self._login_prompt_visible()
             ):
-                print("✅ 登录成功")
+                log.info("登录成功")
                 logged_in = True
                 break
             last = url
             if i > 0 and i % 30 == 0:
-                print("  ⏳ %ds" % i)
+                log.debug("等待扫码中: %ds", i)
         if not logged_in:
             raise TimeoutError("扫码登录超时或未确认进入已登录页面")
         state = self._ctx.storage_state()
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False)
-        print("✅ 登录状态已保存")
+        log.info("登录状态已保存")
 
         # 预热：导航到聊天页验证 session 稳定性，确保 token 生效
         try:
             self.page.goto("https://www.zhipin.com/web/geek/chat", wait_until="load", timeout=30000)
             pause(3, 5)
             if not self._login_prompt_visible():
-                print("✅ 会话预热成功")
+                log.info("会话预热成功")
             else:
-                print("⚠️ 预热时仍检测到登录提示，可能需要手动刷新页面")
+                log.warning("预热时仍检测到登录提示，可能需要手动刷新页面")
         except Exception as e:
-            print(f"⚠️ 会话预热失败: {e}")
+            log.error("会话预热失败: %s", e, exc_info=True)
 
     # ── 搜索列表页 ──
 
@@ -770,12 +774,25 @@ class BossScraper:
             )
         return jobs
 
-    def _scroll_all(self):
+    def _scroll_all(self, min_jobs=200):
+        """持续滚动加载岗位，直到达到 min_jobs 或无新内容。"""
         try:
-            h = self.page.evaluate("document.body.scrollHeight")
-            for p in range(0, int(h) + 400, 400):
-                self.page.evaluate("window.scrollTo(0,%d)" % p)
-                time.sleep(random.uniform(0.3, 0.6))
+            prev_count = 0
+            no_new_rounds = 0
+            while no_new_rounds < 3:
+                h = self.page.evaluate("document.body.scrollHeight")
+                for p in range(0, int(h) + 400, 400):
+                    self.page.evaluate("window.scrollTo(0,%d)" % p)
+                    time.sleep(random.uniform(0.3, 0.6))
+                time.sleep(1)
+                count = len(self.page.query_selector_all('a[href*="/job_detail/"]'))
+                if count >= min_jobs:
+                    break
+                if count == prev_count:
+                    no_new_rounds += 1
+                else:
+                    no_new_rounds = 0
+                prev_count = count
         except:
             pass
 
@@ -962,7 +979,7 @@ def main():
     keywords = [k.strip() for k in args.keywords.split(",")] if args.keywords else KEYWORDS
 
     if not STATE_FILE.exists() and not args.login:
-        print("⚠️ 请先运行: python3 boss_firefox.py --login")
+        log.error("请先运行: python3 boss_firefox.py --login")
         sys.exit(1)
 
     sc = BossScraper(headless=args.headless)
@@ -979,11 +996,11 @@ def main():
             for kw in keywords:
                 if len(all_jobs) >= args.max_jobs:
                     break
-                print("\n📌 搜索: 「%s」@ %s" % (kw, city_name))
+                log.info("搜索: 「%s」@ %s", kw, city_name)
                 try:
                     jobs = sc.search(kw, city_code)
                 except Exception as e:
-                    print("  ⚠️ 失败: %s" % e)
+                    log.error("搜索失败: %s", e)
                     continue
                 ok = []
                 for j in jobs:
@@ -992,30 +1009,26 @@ def main():
                         seen.add(key)
                         j["city"] = city_name  # 标记城市
                         ok.append(j)
-                print("  %d条, 去重后%d条(累计%d)" % (len(jobs), len(ok), len(all_jobs)))
+                log.info("%d条, 去重后%d条(累计%d)", len(jobs), len(ok), len(all_jobs))
                 all_jobs.extend(ok)
                 if len(all_jobs) >= args.max_jobs:
-                    print("  📊 已达上限%d条" % args.max_jobs)
+                    log.info("已达上限%d条", args.max_jobs)
                     break
                 pause(2, 4)
             if len(all_jobs) >= args.max_jobs:
                 break
 
-        print("\n📊 共%d条" % len(all_jobs))
+        log.info("共%d条", len(all_jobs))
         if not all_jobs:
             return
 
         # Phase 2: 逐个访问详情页，提取岗位技能 + 招聘者信息
-        print("\n🔍 开始采集岗位详情（共%d条）..." % len(all_jobs))
+        log.info("开始采集岗位详情（共%d条）...", len(all_jobs))
         success = 0
         for i, j in enumerate(all_jobs):
             if not j.get("url"):
                 continue
-            print(
-                "  [%d/%d] %s" % (i + 1, len(all_jobs), j["title"][:25]),
-                end=" ",
-                flush=True,
-            )
+            log.debug("[%d/%d] %s", i + 1, len(all_jobs), j["title"][:25])
             detail = sc.fetch_detail(j["url"])
             if detail["description"]:
                 j["description"] = detail["description"]
@@ -1023,28 +1036,28 @@ def main():
             j["hr_name"] = detail.get("hr_name", "")
             j["hr_title"] = detail.get("hr_title", "")
             if detail["description"]:
-                print("✅ %d字 | HR: %s" % (len(detail["description"]), j["hr_name"] or "未识别"))
+                log.info("[%d/%d] %s - %d字 | HR: %s", i + 1, len(all_jobs), j["title"][:25], len(detail["description"]), j["hr_name"] or "未识别")
             else:
-                print("⚠️ 无描述 | HR: %s" % (j["hr_name"] or "未识别"))
+                log.warning("[%d/%d] %s - 无描述 | HR: %s", i + 1, len(all_jobs), j["title"][:25], j["hr_name"] or "未识别")
             time.sleep(random.uniform(1.5, 3.0))
 
-        print("📊 详情采集: %d/%d条成功" % (success, len(all_jobs)))
+        log.info("详情采集: %d/%d条成功", success, len(all_jobs))
 
         # 分析输出到终端即可
         gap = skill_gap(all_jobs)
-        print("\n" + "=" * 60)
-        print("📊 技能差距分析")
-        print("=" * 60)
+        log.info("=" * 60)
+        log.info("技能差距分析")
+        log.info("=" * 60)
         for item in gap["have"][:10]:
-            print("  ✅ %s: %d个岗位" % (item["skill"], item["count"]))
+            log.info("已掌握 %s: %d个岗位", item["skill"], item["count"])
         for item in gap["missing"][:15]:
-            p = "🔴" if item["count"] >= 10 else "🟡" if item["count"] >= 5 else "🟢"
-            print("  %s %s: %d个岗位" % (p, item["skill"], item["count"]))
+            p = "[高]" if item["count"] >= 10 else "[中]" if item["count"] >= 5 else "[低]"
+            log.info("需补充 %s %s: %d个岗位", p, item["skill"], item["count"])
 
         # 输出——招聘日报 + CSV 数据文件
         with open(out_dir / ("招聘日报_%s.md" % DATE_STR), "w", encoding="utf-8") as f:
             f.write(output_report(all_jobs))
-        print("📄 日报: %s/招聘日报_%s.md" % (out_dir, DATE_STR))
+        log.info("日报: %s/招聘日报_%s.md", out_dir, DATE_STR)
 
         # CSV 格式，方便 Excel 打开
         csv_path = out_dir / ("招聘数据_%s.csv" % DATE_STR)
@@ -1067,8 +1080,8 @@ def main():
             writer.writeheader()
             for j in all_jobs:
                 writer.writerow({k: j.get(k, "") for k in writer.fieldnames})
-        print("📊 数据: %s/招聘数据_%s.csv" % (out_dir, DATE_STR))
-        print("\n✅ 完成！")
+        log.info("数据: %s/招聘数据_%s.csv", out_dir, DATE_STR)
+        log.info("完成")
 
     finally:
         sc.close()

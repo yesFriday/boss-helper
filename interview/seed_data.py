@@ -6,9 +6,13 @@
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from ollama_client import llm_chat
 from db import add_qa_pair
+from backend.logger import get_logger
+
+log = get_logger("interview.seed_data")
 
 
 # 预置的面试题结构（先加一批基础题）
@@ -90,16 +94,16 @@ SEED_QUESTIONS = [
 
 def seed_database():
     """预置面试问答对到数据库"""
-    print(f"🔄 正在导入 {len(SEED_QUESTIONS)} 条面试题...")
+    log.info(f"正在导入 {len(SEED_QUESTIONS)} 条面试题...")
     count = 0
     for category, question, answer, difficulty, skills in SEED_QUESTIONS:
         try:
             add_qa_pair(category, question, answer, difficulty, skills)
             count += 1
-            print(f"  ✅ [{category}] {question[:40]}...")
+            log.info(f"[{category}] {question[:40]}...")
         except Exception as e:
-            print(f"  ❌ 导入失败: {e}")
-    print(f"\n✅ 成功导入 {count}/{len(SEED_QUESTIONS)} 条面试题")
+            log.error(f"导入失败: {e}", exc_info=True)
+    log.info(f"成功导入 {count}/{len(SEED_QUESTIONS)} 条面试题")
     return count
 
 

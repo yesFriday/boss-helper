@@ -14,6 +14,9 @@ sys.path.insert(0, str(project_root / "interview"))
 from llm_client import llm_chat_deepseek
 
 from backend.state import get_recent_messages, get_setting
+from backend.logger import get_logger
+
+log = get_logger("replier")
 
 SYSTEM_PROMPT = """你是一个求职者开发的AI助手，在BOSS直聘上帮他自动与招聘方沟通。
 
@@ -199,7 +202,7 @@ def generate_reply(
         return reply, interest
 
     except Exception as e:
-        print(f"  ⚠️ generate_reply error: {e}")
+        log.error(f"generate_reply error: {e}", exc_info=True)
         return "", ""
 
 

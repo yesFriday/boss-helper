@@ -17,6 +17,8 @@ export function SettingsPage() {
     daily_apply_limit: '15',
     min_reply_delay_sec: '30',
     max_reply_delay_sec: '120',
+    batch_delay_min_sec: '30',
+    batch_delay_max_sec: '90',
     resume_summary: '',
     wechat_id: '',
     search_keywords: '',
@@ -41,6 +43,8 @@ export function SettingsPage() {
         daily_apply_limit: s.daily_apply_limit || '15',
         min_reply_delay_sec: s.min_reply_delay_sec || '30',
         max_reply_delay_sec: s.max_reply_delay_sec || '120',
+        batch_delay_min_sec: s.batch_delay_min_sec || '30',
+        batch_delay_max_sec: s.batch_delay_max_sec || '90',
         resume_summary: s.resume_summary || '',
         wechat_id: s.wechat_id || '',
         search_keywords: (s.search_keywords || '').replace(/,/g, '\n'),
@@ -62,6 +66,8 @@ export function SettingsPage() {
         daily_apply_limit: formData.daily_apply_limit,
         min_reply_delay_sec: formData.min_reply_delay_sec,
         max_reply_delay_sec: formData.max_reply_delay_sec,
+        batch_delay_min_sec: formData.batch_delay_min_sec,
+        batch_delay_max_sec: formData.batch_delay_max_sec,
         resume_summary: formData.resume_summary,
         wechat_id: formData.wechat_id,
         search_keywords: formData.search_keywords.replace(/\n/g, ','),
@@ -173,6 +179,28 @@ export function SettingsPage() {
                 value={formData.max_reply_delay_sec}
                 onChange={(e) => setFormData((prev) => ({ ...prev, max_reply_delay_sec: e.target.value }))}
                 min={20}
+                max={600}
+                className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">投递间隔(秒)</label>
+            <div className="flex-1 flex items-center gap-3">
+              <input
+                type="number"
+                value={formData.batch_delay_min_sec}
+                onChange={(e) => setFormData((prev) => ({ ...prev, batch_delay_min_sec: e.target.value }))}
+                min={5}
+                max={300}
+                className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              />
+              <span className="text-slate-400 font-semibold">—</span>
+              <input
+                type="number"
+                value={formData.batch_delay_max_sec}
+                onChange={(e) => setFormData((prev) => ({ ...prev, batch_delay_max_sec: e.target.value }))}
+                min={10}
                 max={600}
                 className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
               />

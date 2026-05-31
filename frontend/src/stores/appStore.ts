@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type TabType = 'search' | 'applications' | 'chat' | 'wechat' | 'settings'
+export type TabType = 'search' | 'applications' | 'chat' | 'wechat' | 'automation' | 'settings'
 
 interface AppState {
   activeTab: TabType

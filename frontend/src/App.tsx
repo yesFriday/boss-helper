@@ -4,6 +4,7 @@ import { SearchPage } from './pages/SearchPage'
 import { ApplicationsPage } from './pages/ApplicationsPage'
 import { ChatPage } from './pages/ChatPage'
 import { WechatPage } from './pages/WechatPage'
+import { AutomationPage } from './pages/AutomationPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { useAppStore } from './stores/appStore'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -18,6 +19,7 @@ function App() {
       case 'applications': return <ApplicationsPage />
       case 'chat': return <ChatPage />
       case 'wechat': return <WechatPage />
+      case 'automation': return <AutomationPage />
       case 'settings': return <SettingsPage />
       default: return <SearchPage />
     }

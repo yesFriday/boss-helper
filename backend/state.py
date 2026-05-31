@@ -3,6 +3,7 @@
 SQLite 数据层 —— 投递记录、聊天消息、设置、每日统计。
 """
 
+import json
 import sqlite3
 import threading
 from datetime import date, datetime
@@ -142,6 +143,13 @@ def init_db():
         "resume_summary": "",
         "wechat_id": "",
         "search_keywords": "AI Agent,大模型开发,AI产品经理,RAG开发,大模型应用",
+        "scheduler_config": json.dumps({
+            "enabled": False,
+            "days": [],
+            "time_ranges": [],
+            "auto_apply": {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30},
+            "auto_reply": {"style": "professional"},
+        }),
     }
     for k, v in defaults.items():
         db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
@@ -254,7 +262,7 @@ def update_application_status(app_id: int, status: str, greeting_text: Optional[
 def get_today_application_count() -> int:
     row = (
         get_db()
-        .execute("SELECT COUNT(*) as cnt FROM applications WHERE date(greeting_sent_at)=date('now','localtime')")
+        .execute("SELECT COUNT(*) as cnt FROM applications WHERE status='applied' AND date(updated_at)=date('now','localtime')")
         .fetchone()
     )
     return row["cnt"] if row else 0

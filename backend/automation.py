@@ -12,6 +12,8 @@ from typing import Optional, List, Dict, Any
 from playwright.sync_api import Locator
 
 from backend.firefox import BossScraper, pause, decode_salary
+from backend.logger import get_logger
+log = get_logger("automation")
 from backend.state import (
     init_db,
     add_application,
@@ -214,16 +216,16 @@ class BossAutomation(BossScraper):
             body_lower = body.lower()
 
             if self._login_prompt_visible():
-                print("  ⚠️ 安全检查: 需要重新登录")
+                log.warning("安全检查: 需要重新登录")
                 return False
             if any(kw in body_lower[:500] for kw in ["验证", "滑块", "拼图", "captcha", "verify"]):
-                print("  ⚠️ 安全检查: 检测到验证码")
+                log.warning("安全检查: 检测到验证码")
                 return False
             if any(kw in body_lower[:500] for kw in ["账号异常", "违规", "限制使用", "冻结"]):
-                print("  ⚠️ 安全检查: 账号异常")
+                log.warning("安全检查: 账号异常")
                 return False
             if any(kw in body_lower[:500] for kw in ["操作太频繁", "稍后再试", "休息一下"]):
-                print("  ⚠️ 安全检查: 操作频率限制")
+                log.warning("安全检查: 操作频率限制")
                 return False
             return True
         except Exception:
@@ -303,7 +305,7 @@ class BossAutomation(BossScraper):
         if today_count >= min(daily_limit, MAX_APPLY_PER_DAY):
             return {"success": False, "message": f"已达今日上限({today_count}条)"}
 
-        print(f"  🚀 投递: {job_url[:60]}...")
+        log.info(f"投递: {job_url[:60]}...")
 
         try:
             self.page.goto(job_url, wait_until="load", timeout=45000)
@@ -340,7 +342,12 @@ class BossAutomation(BossScraper):
                 return {"success": False, "message": "BOSS直聘今日沟通次数已用完"}
 
             # 等待聊天窗口加载
-            chat_input = self._find_element(SELECTORS["chat_input"], timeout_ms=5000)
+            log.info("等待聊天窗口加载...")
+            chat_input = self._find_element(SELECTORS["chat_input"], timeout_ms=10000)
+            if not chat_input:
+                log.warning("未找到聊天输入框（等待10秒后），跳过发送招呼语")
+                log.debug(f"当前页面URL: {self.page.url}")
+                log.debug(f"当前页面标题: {self.page.title()}")
 
             # 发送招呼语
             greeting_text = greeting or get_setting(
@@ -351,9 +358,9 @@ class BossAutomation(BossScraper):
             if chat_input and greeting_text:
                 greeting_sent = self.send_message(greeting_text)
                 if greeting_sent:
-                    print(f"  ✅ 招呼语已发送")
+                    log.info("招呼语已发送")
                 else:
-                    print(f"  ⚠️ 招招呼语发送失败")
+                    log.warning("招呼语发送失败")
 
             # 记录到 SQLite
             existing = get_application_by_url(job_url)
@@ -410,11 +417,11 @@ class BossAutomation(BossScraper):
                 get_or_create_conversation(app_id, hr_name, hr_company, job_title)
 
             increment_daily_stat("applications_sent")
-            print(f"  ✅ 投递成功")
+            log.info("投递成功")
             return {"success": True, "message": "投递成功", "application_id": app_id}
 
         except Exception as e:
-            print(f"  ❌ 投递失败: {e}")
+            log.error(f"投递失败: {e}", exc_info=True)
             return {"success": False, "message": str(e)}
 
     def apply_batch(self, job_urls: List[str], greeting_template: Optional[str] = None) -> List[dict]:
@@ -425,7 +432,7 @@ class BossAutomation(BossScraper):
         for i, url in enumerate(job_urls):
             if i > 0:
                 delay = random.uniform(min_delay, max_delay)
-                print(f"  ⏳ 等待 {delay:.0f}s 后投递下一条...")
+                log.info(f"[WAIT] 等待 {delay:.0f}s 后投递下一条...")
                 time.sleep(delay)
 
             result = self.apply_to_job(url, greeting_template)
@@ -653,7 +660,7 @@ class BossAutomation(BossScraper):
                 return True
             return False
         except Exception as e:
-            print(f"  ⚠️ 打开会话失败 ({hr_name}): {e}")
+            log.error(f"打开会话失败 ({hr_name}): {e}", exc_info=True)
             return False
 
     def send_message(self, text: str, fast: bool = True) -> bool:
@@ -704,7 +711,7 @@ class BossAutomation(BossScraper):
 
             return False
         except Exception as e:
-            print(f"  ⚠️ send_message 失败: {e}")
+            log.error(f"send_message 失败: {e}", exc_info=True)
             return False
 
     def _get_chat_security_id(self, hr_name: str = "") -> str:
@@ -761,15 +768,15 @@ class BossAutomation(BossScraper):
                             return f.get("securityId", "")
 
                 if attempt < 2:
-                    print(f"  [securityId] 第{attempt + 1}次获取失败，重试...")
+                    log.debug(f"[securityId] 第{attempt + 1}次获取失败，重试...")
                     pause(1, 2)
 
             except Exception as e:
-                print(f"  [securityId] 获取异常: {e}")
+                log.error(f"[securityId] 获取异常: {e}", exc_info=True)
                 if attempt < 2:
                     pause(1, 2)
 
-        print(f"  ⚠️ securityId 获取失败（3次重试），HR: {hr_name}")
+        log.warning(f"securityId 获取失败（3次重试），HR: {hr_name}")
         return ""
 
     def send_wechat(self, hr_name: str = "") -> bool:
@@ -791,14 +798,14 @@ class BossAutomation(BossScraper):
                 """,
                     sid,
                 )
-                print("  [换微信] API /exchange/test 已调用")
+                log.info("[换微信] API /exchange/test 已调用")
             else:
                 btn = self._find_element(SELECTORS["wechat_share_btn"], timeout_ms=5000)
                 if not btn:
-                    print("  ⚠️ send_wechat: 无法获取 securityId 且未找到按钮")
+                    log.warning("send_wechat: 无法获取 securityId 且未找到按钮")
                     return False
                 btn.click()
-                print("  [换微信] 已点击换微信按钮")
+                log.info("[换微信] 已点击换微信按钮")
 
             # 等弹窗 → 点「确定」
             confirm_clicked = self.page.evaluate("""() => {
@@ -834,14 +841,14 @@ class BossAutomation(BossScraper):
             }""")
             if confirm_clicked:
                 pause(0.5, 1)
-                print("  [换微信] 已点确定按钮")
+                log.info("[换微信] 已点确定按钮")
                 return True
 
-            print("  [换微信] 超时: 未找到确定按钮")
+            log.warning("[换微信] 超时: 未找到确定按钮")
             return False
 
         except Exception as e:
-            print(f"  ⚠️ send_wechat 失败: {e}")
+            log.error(f"send_wechat 失败: {e}", exc_info=True)
             return False
 
     def send_phone(self, hr_name: str = "") -> bool:
@@ -863,14 +870,14 @@ class BossAutomation(BossScraper):
                 """,
                     sid,
                 )
-                print("  [换电话] API /exchange/test (type=1) 已调用")
+                log.info("[换电话] API /exchange/test (type=1) 已调用")
             else:
                 btn = self._find_element(SELECTORS["phone_share_btn"], timeout_ms=5000)
                 if not btn:
-                    print("  ⚠️ send_phone: 无法获取 securityId 且未找到按钮")
+                    log.warning("send_phone: 无法获取 securityId 且未找到按钮")
                     return False
                 btn.click()
-                print("  [换电话] 已点击换电话按钮")
+                log.info("[换电话] 已点击换电话按钮")
 
             # 等弹窗 → 点「确定」
             confirm_clicked = self.page.evaluate("""() => {
@@ -904,14 +911,14 @@ class BossAutomation(BossScraper):
             }""")
             if confirm_clicked:
                 pause(0.5, 1)
-                print("  [换电话] 已点确定按钮")
+                log.info("[换电话] 已点确定按钮")
                 return True
 
-            print("  [换电话] 超时: 未找到确定按钮")
+            log.warning("[换电话] 超时: 未找到确定按钮")
             return False
 
         except Exception as e:
-            print(f"  ⚠️ send_phone 失败: {e}")
+            log.error(f"send_phone 失败: {e}", exc_info=True)
             return False
 
     def send_resume(self) -> bool:
@@ -919,10 +926,10 @@ class BossAutomation(BossScraper):
         try:
             btn = self._find_element(SELECTORS["resume_attach_btn"], timeout_ms=5000)
             if not btn:
-                print("  ⚠️ send_resume: 未找到发简历按钮")
+                log.warning("send_resume: 未找到发简历按钮")
                 return False
             btn.click()
-            print("  [发简历] 已点击发简历按钮")
+            log.info("[发简历] 已点击发简历按钮")
             pause(1, 2)
 
             # 等弹窗出现 → 点「发送」按钮
@@ -930,14 +937,14 @@ class BossAutomation(BossScraper):
             if confirm:
                 confirm.click()
                 pause(0.5, 1)
-                print("  [发简历] 已点发送按钮")
+                log.info("[发简历] 已点发送按钮")
                 return True
 
             # 兜底：无弹窗但已点击
-            print("  [发简历] 无弹窗，直接完成")
+            log.info("[发简历] 无弹窗，直接完成")
             return True
         except Exception as e:
-            print(f"  ⚠️ send_resume 失败: {e}")
+            log.error(f"send_resume 失败: {e}", exc_info=True)
             return False
 
     # ══════════════════════════════════════
@@ -958,7 +965,7 @@ class BossAutomation(BossScraper):
         need_nav = "/web/geek/chat" not in current_url
         if need_nav:
             if not self.navigate_to_chat():
-                print("  [监控] 导航到聊天页失败")
+                log.info("[监控] 导航到聊天页失败")
                 return result
         else:
             # 已在聊天页，轻量点击「未读」Tab 即可
@@ -973,30 +980,30 @@ class BossAutomation(BossScraper):
                     pass
 
         if not self.check_page_safety():
-            print("  [监控] 安全检查未通过（登录过期/验证码等）")
+            log.warning("[监控] 安全检查未通过（登录过期/验证码等）")
             return result
 
         conversations = self.poll_conversation_list()
         result["checked"] = len(conversations)
-        print(f"  [监控] 扫描到 {len(conversations)} 个会话")
+        log.info(f"[监控] 扫描到 {len(conversations)} 个会话")
         # 始终打印 body 内容用于调试
         try:
             preview = (self.page.inner_text("body") or "")[:800].replace("\n", " | ")
-            print(f"  [监控] Body: {preview}")
+            log.debug(f"[监控] Body: {preview}")
         except Exception:
             pass
 
         from backend.state import list_active_conversations
 
         known_convs = list_active_conversations()
-        print(f"  [监控] 数据库已知活跃会话: {len(known_convs)}")
+        log.info(f"[监控] 数据库已知活跃会话: {len(known_convs)}")
 
         # 已在导航时切到「未读」Tab，当前列表都是未读。每轮上限 3 个
         if not conversations:
-            print(f"  [监控] 无未读消息，跳过本轮")
+            log.info("[监控] 无未读消息，跳过本轮")
             return result
         if len(conversations) > 3:
-            print(f"  [监控] 未读会话: {len(conversations)} 个，本轮只处理前3个")
+            log.info(f"[监控] 未读会话: {len(conversations)} 个，本轮只处理前3个")
             conversations = conversations[:3]
 
         for conv_data in conversations:
@@ -1064,7 +1071,7 @@ class BossAutomation(BossScraper):
                     and not any(kw in hr_name and len(hr_name) <= len(kw) + 1 for kw in skip_keywords)
                 )
                 if not is_valid:
-                    print(f"  [监控] 跳过无效会话名: '{hr_name}' (原文: {text[:50]})")
+                    log.debug(f"[监控] 跳过无效会话名: '{hr_name}' (原文: {text[:50]})")
                     continue
 
                 conv_id = get_or_create_conversation(
@@ -1074,7 +1081,7 @@ class BossAutomation(BossScraper):
                 matched_conv = get_conversation(conv_id)
                 if not matched_conv:
                     continue
-                print(f"  [监控] 新建会话: {hr_name}")
+                log.info(f"[监控] 新建会话: {hr_name}")
                 # 标记用于 WebSocket 广播
                 result.setdefault("new_conversations", []).append(hr_name)
             else:
@@ -1114,7 +1121,7 @@ class BossAutomation(BossScraper):
                         _gdb3().execute("UPDATE conversations SET hr_company=? WHERE id=?", (company, conv_id))
                         _gdb3().commit()
                         matched_conv["hr_company"] = company
-                        print(f"  [监控] 提取公司名: {company}")
+                        log.info(f"[监控] 提取公司名: {company}")
                     except Exception:
                         pass
 
@@ -1131,11 +1138,11 @@ class BossAutomation(BossScraper):
                 if short:
                     opened = self.open_conversation_by_name(short.group(0))
             if not opened:
-                print(f"  [监控] 无法打开会话: {hr_name_to_open}")
+                log.info(f"[监控] 无法打开会话: {hr_name_to_open}")
                 continue
             pause(1, 2)
             msgs = self.read_visible_messages()
-            print(f"  [监控] 会话 {matched_conv.get('hr_name')}: 读到 {len(msgs)} 条消息")
+            log.info(f"[监控] 会话 {matched_conv.get('hr_name')}: 读到 {len(msgs)} 条消息")
 
             new_count = 0
             clean_msgs = []
@@ -1175,7 +1182,7 @@ class BossAutomation(BossScraper):
                                         update_conversation_wechat(conv_id, wx_id)
                                         matched_conv["hr_wechat"] = wx_id
                                         result["wechat_exchanged"] = True
-                                        print(f"  [监控] 提取HR微信: {wx_id}")
+                                        log.info(f"[监控] 提取HR微信: {wx_id}")
                                         break
 
             # 检测需要回复的 HR 消息：仅跳过纯 BOSS 系统通知（<80字且以系统模式开头）
@@ -1206,7 +1213,7 @@ class BossAutomation(BossScraper):
                 if not has_reply_after:
                     unreplied_hr_msg = m["content"]
                     new_count = 1
-                    print(f"  [监控] 待回复HR消息: {m['content'][:60]}...")
+                    log.info(f"[监控] 待回复HR消息: {m['content'][:60]}...")
                 break
 
             if unreplied_hr_msg:
@@ -1252,7 +1259,7 @@ class BossAutomation(BossScraper):
                         # 发简历：HR明确要求简历时，且未发送过
                         if any(kw in msg_lower for kw in ("简历", "cv", "resume")):
                             if not matched_conv.get("resume_sent"):
-                                print(f"  [监控] HR要简历，正在发送...")
+                                log.info("[监控] HR要简历，正在发送...")
                                 if self.send_resume():
                                     from backend.state import mark_resume_sent
 
@@ -1273,14 +1280,14 @@ class BossAutomation(BossScraper):
                         )
                         if any(kw in msg_lower for kw in wechat_keywords):
                             if not matched_conv.get("hr_wechat"):
-                                print(f"  [监控] HR要微信，正在发送...")
+                                log.info("[监控] HR要微信，正在发送...")
                                 self.send_wechat(hr_name_to_open)
                                 pause(1, 2)
 
                         # 换电话：HR明确要电话时，且未发送过
                         if any(kw in msg_lower for kw in ("电话", "手机号")):
                             if not matched_conv.get("phone_shared"):
-                                print(f"  [监控] HR要电话，正在发送...")
+                                log.info("[监控] HR要电话，正在发送...")
                                 if self.send_phone(hr_name_to_open):
                                     from backend.state import mark_phone_shared
 
@@ -1288,7 +1295,7 @@ class BossAutomation(BossScraper):
                                     pause(1, 2)
 
                         # 然后再发送AI回复
-                        print(f"  [监控] AI回复: {reply[:60]}...")
+                        log.info(f"[监控] AI回复: {reply[:60]}...")
                         if self.send_message(reply):
                             add_message(conv_id, "me", reply, ai_generated=True)
                             update_conversation_last_message(conv_id, reply, "me", 0)
@@ -1296,22 +1303,22 @@ class BossAutomation(BossScraper):
                             result["replies_sent"] += 1
                             if interest:
                                 update_conversation_interest(conv_id, interest)
-                                print(f"  [监控] HR兴趣度: {interest}")
-                            print(f"  [监控] 回复已发送")
+                                log.info(f"[监控] HR兴趣度: {interest}")
+                            log.info("[监控] 回复已发送")
                         else:
-                            print(f"  [监控] 回复发送失败!")
+                            log.warning("[监控] 回复发送失败!")
                         pause(5, 15)
                 except Exception as e:
-                    print(f"  ⚠️ AI回复生成失败: {e}")
+                    log.error(f"AI回复生成失败: {e}", exc_info=True)
             elif unreplied_hr_msg and not auto_reply_enabled:
-                print(f"  [监控] 自动回复已关闭，跳过")
+                log.info("[监控] 自动回复已关闭，跳过")
 
             # 下一个会话前确保输入框已清空，避免残留文字
             try:
                 input_el = self.page.locator("#chat-input").first
                 text = input_el.inner_text().strip()
                 if text:
-                    print(f"  [监控] 输入框残留文字「{text[:30]}...」，正在清空")
+                    log.debug(f"[监控] 输入框残留文字「{text[:30]}...」，正在清空")
                     input_el.click()
                     self.page.keyboard.press("Control+a")
                     self.page.keyboard.press("Backspace")
@@ -1330,5 +1337,5 @@ class BossAutomation(BossScraper):
                     pass
             pause(0.5, 1)
 
-        print(f"  [监控] 本轮完成: 消息 {result['new_messages']}, 回复 {result['replies_sent']}")
+        log.info(f"[监控] 本轮完成: 消息 {result['new_messages']}, 回复 {result['replies_sent']}")
         return result

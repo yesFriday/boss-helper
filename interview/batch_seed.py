@@ -20,6 +20,9 @@ API_URL = f"{BASE_URL}/chat/completions"
 MODEL = get_setting("ai_model") or "deepseek-chat"
 
 import pymysql
+from backend.logger import get_logger
+
+log = get_logger("interview.batch_seed")
 
 DB = {
     "host": "127.0.0.1",
@@ -59,7 +62,7 @@ def insert_qa(topic, question, answer):
         return True
     except Exception as e:
         conn.rollback()
-        print(f"\n  ❌ 插入失败: {e}")
+        log.error(f"插入失败: {e}", exc_info=True)
         return False
     finally:
         conn.close()
@@ -219,7 +222,7 @@ def generate_answer(topic, question):
             answer = answer.replace("答案：", "").replace("答案:", "").strip()
             return answer
         except Exception as e:
-            print(f"\n  ⚠️ 重试({attempt + 1}/2): {e}")
+            log.warning(f"重试({attempt + 1}/2): {e}")
             time.sleep(3)
     return ""
 
@@ -232,7 +235,7 @@ def seed_all():
     added = 0
     errors = 0
 
-    print(f"🚀 准备生成 {total} 条面试问答对...\n")
+    log.info(f"准备生成 {total} 条面试问答对...")
 
     for topic, questions in TOPICS.items():
         count = 0
@@ -240,30 +243,30 @@ def seed_all():
             done += 1
 
             if question_exists(q):
-                print(f"  ⏭️ [{done}/{total}] [{topic}] 已存在")
+                log.info(f"[{done}/{total}] [{topic}] 已存在，跳过")
                 skipped += 1
                 continue
 
-            print(f"  🔄 [{done}/{total}] [{topic}] 生成中...", end="", flush=True)
+            log.info(f"[{done}/{total}] [{topic}] 生成中...")
             answer = generate_answer(topic, q)
 
             if answer and len(answer) > 20:
                 if insert_qa(topic, q, answer):
                     count += 1
                     added += 1
-                    print(f" ✅ ({len(answer)}字)")
+                    log.info(f"生成成功 ({len(answer)}字)")
                 else:
                     errors += 1
-                    print(f" ❌ 入库失败")
+                    log.error("入库失败")
             else:
                 errors += 1
-                print(f" ❌ 生成内容为空")
+                log.error("生成内容为空")
 
             time.sleep(0.3)  # API限速
 
-        print(f"\n📊 [{topic}] 新增 {count} 条\n")
+        log.debug(f"[{topic}] 新增 {count} 条")
 
-    print(f"🎉 完成！总计 {total} 条 | 新增 {added} | 跳过 {skipped} | 失败 {errors}")
+    log.info(f"完成！总计 {total} 条 | 新增 {added} | 跳过 {skipped} | 失败 {errors}")
 
 
 def refresh_embeddings():
@@ -293,13 +296,13 @@ def refresh_embeddings():
             finally:
                 conn.close()
         except Exception as e:
-            print(f"embedding错误 id={qid}: {e}")
+            log.error(f"embedding错误 id={qid}: {e}", exc_info=True)
 
-    print(f"\n刷新了 {count} 条embedding")
+    log.info(f"刷新了 {count} 条embedding")
 
 
 if __name__ == "__main__":
     seed_all()
-    print("\n刷新embedding...")
+    log.info("刷新embedding...")
     refresh_embeddings()
-    print("全部完成！")
+    log.info("全部完成！")

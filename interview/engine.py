@@ -1,4 +1,4 @@
-"""
+  """
 面试问答Agent - 面试引擎核心
 出题（qwen2.5:14b）+ 批改（DeepSeek）+ 自动存入问答对
 """
@@ -10,6 +10,9 @@ from typing import Optional, List, Dict, Any
 from llm_client import llm_chat_ollama, llm_chat_deepseek, parse_json_from_llm
 from db import (semantic_search_qa, search_jobs_by_semantic,
                 save_interview_record, add_qa_pair, get_all_job_categories)
+from backend.logger import get_logger
+
+log = get_logger("interview.engine")
 
 
 class InterviewEngine:
@@ -278,7 +281,7 @@ class InterviewEngine:
                     skills=skills_str,
                 )
             except Exception as e:
-                print(f"[WARN] 自动存入问答对失败: {e}")
+                log.warning(f"自动存入问答对失败: {e}", exc_info=True)
 
         return grade
 
