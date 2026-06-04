@@ -28,68 +28,73 @@ def get_db() -> sqlite3.Connection:
 def init_db():
     db = get_db()
     db.executescript("""
+        -- 岗位/投递记录表：每投递一个岗位生成一条记录
         CREATE TABLE IF NOT EXISTS applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_title TEXT NOT NULL,
-            company TEXT,
-            salary TEXT,
-            job_url TEXT UNIQUE NOT NULL,
-            city TEXT,
-            experience TEXT,
-            education TEXT,
-            hr_name TEXT,
-            hr_title TEXT,
-            description TEXT,
-            status TEXT DEFAULT 'pending',
-            greeting_text TEXT,
-            greeting_sent_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id INTEGER PRIMARY KEY AUTOINCREMENT,          -- 主键ID
+            job_title TEXT NOT NULL,                        -- 岗位名称，如"AI Agent开发"
+            company TEXT,                                   -- 公司名称
+            salary TEXT,                                    -- 薪资范围，如"15-25K"
+            job_url TEXT UNIQUE NOT NULL,                   -- 岗位详情页URL（唯一）
+            city TEXT,                                      -- 城市，如"淄博"
+            experience TEXT,                                -- 经验要求，如"3-5年"
+            education TEXT,                                 -- 学历要求，如"本科"
+            hr_name TEXT,                                   -- HR姓名
+            hr_title TEXT,                                  -- HR职位，如"招聘经理"
+            description TEXT,                               -- 岗位描述/JD全文
+            status TEXT DEFAULT 'pending',                  -- 状态：pending=待投递, applied=已投递, skipped=已跳过
+            greeting_text TEXT,                             -- 发送的招呼语内容
+            greeting_sent_at TIMESTAMP,                     -- 招呼语发送时间
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 记录创建时间
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
         );
 
+        -- 会话表：每个HR的对话记录（一个HR一条记录）
         CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            application_id INTEGER REFERENCES applications(id),
-            hr_name TEXT NOT NULL,
-            hr_company TEXT,
-            job_title TEXT,
-            last_message_text TEXT,
-            last_message_from TEXT,
-            last_message_at TIMESTAMP,
-            unread_count INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'active',
-            auto_reply_enabled INTEGER DEFAULT 1,
-            interest_level TEXT,
-            hr_wechat TEXT,
-            wechat_shared_at TIMESTAMP,
-            resume_sent INTEGER DEFAULT 0,
-            phone_shared INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id INTEGER PRIMARY KEY AUTOINCREMENT,          -- 主键ID
+            application_id INTEGER REFERENCES applications(id), -- 关联的岗位ID
+            hr_name TEXT NOT NULL,                          -- HR姓名
+            hr_company TEXT,                                -- HR所在公司
+            job_title TEXT,                                 -- 应聘岗位名称
+            last_message_text TEXT,                         -- 最后一条消息内容
+            last_message_from TEXT,                         -- 最后消息发送者：hr/me
+            last_message_at TIMESTAMP,                      -- 最后消息时间
+            unread_count INTEGER DEFAULT 0,                 -- 未读消息数
+            status TEXT DEFAULT 'active',                   -- 会话状态：active=活跃, closed=已结束
+            auto_reply_enabled INTEGER DEFAULT 1,           -- 是否开启自动回复：1=开启, 0=关闭
+            interest_level TEXT,                            -- HR兴趣度：high/medium/low（AI评估）
+            hr_wechat TEXT,                                 -- HR的微信号（从聊天中提取）
+            wechat_shared_at TIMESTAMP,                     -- 微信交换时间
+            resume_sent INTEGER DEFAULT 0,                  -- 是否已发送简历：1=已发送, 0=未发送
+            phone_shared INTEGER DEFAULT 0,                 -- 是否已交换电话：1=已交换, 0=未交换
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 记录创建时间
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
         );
 
+        -- 消息表：每条聊天消息（一个会话有多条消息）
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER NOT NULL REFERENCES conversations(id),
-            sender TEXT NOT NULL,
-            content TEXT NOT NULL,
-            delivery_status TEXT,
-            ai_generated INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id INTEGER PRIMARY KEY AUTOINCREMENT,          -- 主键ID
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id), -- 所属会话ID
+            sender TEXT NOT NULL,                           -- 发送者：hr=HR发送, me=我方发送
+            content TEXT NOT NULL,                          -- 消息内容
+            delivery_status TEXT,                           -- 送达状态：已读/未读/送达/发送失败
+            ai_generated INTEGER DEFAULT 0,                 -- 是否AI生成：1=AI生成, 0=人工发送
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 消息时间
         );
 
+        -- 配置表：系统配置项（键值对存储）
         CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            key TEXT PRIMARY KEY,                           -- 配置项名称
+            value TEXT NOT NULL,                            -- 配置项值（JSON字符串）
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
         );
 
+        -- 每日统计表：每天的投递和聊天统计
         CREATE TABLE IF NOT EXISTS daily_stats (
-            date TEXT PRIMARY KEY,
-            applications_sent INTEGER DEFAULT 0,
-            messages_sent INTEGER DEFAULT 0,
-            messages_received INTEGER DEFAULT 0,
-            auto_replies_sent INTEGER DEFAULT 0
+            date TEXT PRIMARY KEY,                          -- 日期，如"2026-06-01"
+            applications_sent INTEGER DEFAULT 0,            -- 当日投递数
+            messages_sent INTEGER DEFAULT 0,                -- 当日发送消息数
+            messages_received INTEGER DEFAULT 0,            -- 当日接收消息数
+            auto_replies_sent INTEGER DEFAULT 0             -- 当日AI自动回复数
         );
     """)
     try:

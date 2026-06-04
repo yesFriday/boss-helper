@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.logger import get_logger
-from backend.automation import BossAutomation
+from backend.autochat import BossAutomation
 
 log = get_logger("app")
 from backend.state import (
@@ -595,7 +595,7 @@ async def selectors_status():
     """检查所有关键选择器的有效性。"""
     if not automation or automation.page is None:
         raise HTTPException(status_code=503, detail="浏览器未启动")
-    from backend.automation import SELECTORS
+    from backend.autochat import SELECTORS
 
     result = await _run_pw(
         lambda: automation.page.evaluate(
