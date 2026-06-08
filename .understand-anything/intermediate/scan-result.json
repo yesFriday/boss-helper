@@ -1,0 +1,339 @@
+{
+  "name": "bosshelper",
+  "description": "AI 驱动的 BOSS 直聘智能求职助手，提供 Web 控制台 + CLI 双界面。支持 60+ 城市岗位搜索、福利筛选、一键批量投递、AI 自动接管聊天回复、自动交换微信/简历/电话、投递转化漏斗统计。后端基于 FastAPI + Playwright + SQLite，前端使用 React + TypeScript + Tailwind，同时提供 MCP Server 供 AI Agent 标准协议调用。",
+  "languages": ["css", "html", "javascript", "json", "markdown", "python", "shell", "toml", "typescript", "txt", "yaml"],
+  "frameworks": ["FastAPI", "Playwright", "React", "Vite", "Tailwind CSS", "Zustand", "MCP"],
+  "files": [
+    {"path": ".gitattributes", "language": "unknown", "sizeLines": 8, "fileCategory": "code"},
+    {"path": ".github/workflows/ci.yml", "language": "yaml", "sizeLines": 17, "fileCategory": "infra"},
+    {"path": ".pre-commit-config.yaml", "language": "yaml", "sizeLines": 16, "fileCategory": "config"},
+    {"path": "项目问题.md", "language": "markdown", "sizeLines": 1, "fileCategory": "docs"},
+    {"path": "backend/__init__.py", "language": "python", "sizeLines": 1, "fileCategory": "code"},
+    {"path": "backend/app.py", "language": "python", "sizeLines": 1488, "fileCategory": "code"},
+    {"path": "backend/autochat.py", "language": "python", "sizeLines": 1341, "fileCategory": "code"},
+    {"path": "backend/firefox.py", "language": "python", "sizeLines": 1091, "fileCategory": "code"},
+    {"path": "backend/interview/llm_client.py", "language": "python", "sizeLines": 126, "fileCategory": "code"},
+    {"path": "backend/logger.py", "language": "python", "sizeLines": 46, "fileCategory": "code"},
+    {"path": "backend/mcp_server.py", "language": "python", "sizeLines": 254, "fileCategory": "code"},
+    {"path": "backend/replier.py", "language": "python", "sizeLines": 221, "fileCategory": "code"},
+    {"path": "backend/scraper.py", "language": "python", "sizeLines": 547, "fileCategory": "code"},
+    {"path": "backend/state.py", "language": "python", "sizeLines": 610, "fileCategory": "code"},
+    {"path": "bosshelper_cli/__init__.py", "language": "python", "sizeLines": 1, "fileCategory": "code"},
+    {"path": "bosshelper_cli/cli.py", "language": "python", "sizeLines": 212, "fileCategory": "code"},
+    {"path": "bosshelper_cli/client.py", "language": "python", "sizeLines": 88, "fileCategory": "code"},
+    {"path": "bosshelper_cli/output.py", "language": "python", "sizeLines": 43, "fileCategory": "code"},
+    {"path": "bosshelper_cli/schema.json", "language": "json", "sizeLines": 111, "fileCategory": "config"},
+    {"path": "CHANGELOG.md", "language": "markdown", "sizeLines": 26, "fileCategory": "docs"},
+    {"path": "config.yaml", "language": "yaml", "sizeLines": 19, "fileCategory": "config"},
+    {"path": "CONTRIBUTING.md", "language": "markdown", "sizeLines": 43, "fileCategory": "docs"},
+    {"path": "docs/database.md", "language": "markdown", "sizeLines": 181, "fileCategory": "docs"},
+    {"path": "frontend/eslint.config.js", "language": "javascript", "sizeLines": 22, "fileCategory": "code"},
+    {"path": "frontend/index.html", "language": "html", "sizeLines": 13, "fileCategory": "markup"},
+    {"path": "frontend/package.json", "language": "json", "sizeLines": 38, "fileCategory": "config"},
+    {"path": "frontend/postcss.config.js", "language": "javascript", "sizeLines": 6, "fileCategory": "code"},
+    {"path": "frontend/README.md", "language": "markdown", "sizeLines": 73, "fileCategory": "docs"},
+    {"path": "frontend/src/api/client.ts", "language": "typescript", "sizeLines": 31, "fileCategory": "code"},
+    {"path": "frontend/src/api/conversations.ts", "language": "typescript", "sizeLines": 19, "fileCategory": "code"},
+    {"path": "frontend/src/api/jobs.ts", "language": "typescript", "sizeLines": 22, "fileCategory": "code"},
+    {"path": "frontend/src/api/scheduler.ts", "language": "typescript", "sizeLines": 29, "fileCategory": "code"},
+    {"path": "frontend/src/api/settings.ts", "language": "typescript", "sizeLines": 7, "fileCategory": "code"},
+    {"path": "frontend/src/api/shortlists.ts", "language": "typescript", "sizeLines": 9, "fileCategory": "code"},
+    {"path": "frontend/src/api/system.ts", "language": "typescript", "sizeLines": 14, "fileCategory": "code"},
+    {"path": "frontend/src/api/types.ts", "language": "typescript", "sizeLines": 119, "fileCategory": "code"},
+    {"path": "frontend/src/api/wechat.ts", "language": "typescript", "sizeLines": 6, "fileCategory": "code"},
+    {"path": "frontend/src/App.tsx", "language": "typescript", "sizeLines": 38, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/Badge.tsx", "language": "typescript", "sizeLines": 42, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/Button.tsx", "language": "typescript", "sizeLines": 66, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/Card.tsx", "language": "typescript", "sizeLines": 29, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/EmptyState.tsx", "language": "typescript", "sizeLines": 46, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/Spinner.tsx", "language": "typescript", "sizeLines": 26, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/TimePicker.tsx", "language": "typescript", "sizeLines": 102, "fileCategory": "code"},
+    {"path": "frontend/src/components/common/Toggle.tsx", "language": "typescript", "sizeLines": 26, "fileCategory": "code"},
+    {"path": "frontend/src/components/layout/PageHeader.tsx", "language": "typescript", "sizeLines": 66, "fileCategory": "code"},
+    {"path": "frontend/src/components/layout/Sidebar.tsx", "language": "typescript", "sizeLines": 85, "fileCategory": "code"},
+    {"path": "frontend/src/components/search/AnalyzeModal.tsx", "language": "typescript", "sizeLines": 90, "fileCategory": "code"},
+    {"path": "frontend/src/components/search/FunnelBar.tsx", "language": "typescript", "sizeLines": 36, "fileCategory": "code"},
+    {"path": "frontend/src/components/search/JobCard.tsx", "language": "typescript", "sizeLines": 65, "fileCategory": "code"},
+    {"path": "frontend/src/components/search/SearchBar.tsx", "language": "typescript", "sizeLines": 98, "fileCategory": "code"},
+    {"path": "frontend/src/hooks/useWebSocket.ts", "language": "typescript", "sizeLines": 121, "fileCategory": "code"},
+    {"path": "frontend/src/index.css", "language": "css", "sizeLines": 14, "fileCategory": "markup"},
+    {"path": "frontend/src/lib/cn.ts", "language": "typescript", "sizeLines": 6, "fileCategory": "code"},
+    {"path": "frontend/src/lib/constants.ts", "language": "typescript", "sizeLines": 59, "fileCategory": "code"},
+    {"path": "frontend/src/lib/utils.ts", "language": "typescript", "sizeLines": 18, "fileCategory": "code"},
+    {"path": "frontend/src/main.tsx", "language": "typescript", "sizeLines": 10, "fileCategory": "code"},
+    {"path": "frontend/src/pages/ApplicationsPage.tsx", "language": "typescript", "sizeLines": 274, "fileCategory": "code"},
+    {"path": "frontend/src/pages/AutomationPage.tsx", "language": "typescript", "sizeLines": 311, "fileCategory": "code"},
+    {"path": "frontend/src/pages/ChatPage.tsx", "language": "typescript", "sizeLines": 197, "fileCategory": "code"},
+    {"path": "frontend/src/pages/SearchPage.tsx", "language": "typescript", "sizeLines": 184, "fileCategory": "code"},
+    {"path": "frontend/src/pages/SettingsPage.tsx", "language": "typescript", "sizeLines": 360, "fileCategory": "code"},
+    {"path": "frontend/src/pages/WechatPage.tsx", "language": "typescript", "sizeLines": 96, "fileCategory": "code"},
+    {"path": "frontend/src/stores/appStore.ts", "language": "typescript", "sizeLines": 13, "fileCategory": "code"},
+    {"path": "frontend/src/stores/chatStore.ts", "language": "typescript", "sizeLines": 20, "fileCategory": "code"},
+    {"path": "frontend/src/stores/jobsStore.ts", "language": "typescript", "sizeLines": 43, "fileCategory": "code"},
+    {"path": "frontend/src/stores/notificationStore.ts", "language": "typescript", "sizeLines": 26, "fileCategory": "code"},
+    {"path": "frontend/src/stores/schedulerStore.ts", "language": "typescript", "sizeLines": 39, "fileCategory": "code"},
+    {"path": "frontend/src/stores/settingsStore.ts", "language": "typescript", "sizeLines": 16, "fileCategory": "code"},
+    {"path": "frontend/src/stores/systemStore.ts", "language": "typescript", "sizeLines": 44, "fileCategory": "code"},
+    {"path": "frontend/src/vite-env.d.ts", "language": "typescript", "sizeLines": 1, "fileCategory": "code"},
+    {"path": "frontend/tailwind.config.js", "language": "javascript", "sizeLines": 30, "fileCategory": "code"},
+    {"path": "frontend/tsconfig.app.json", "language": "json", "sizeLines": 24, "fileCategory": "config"},
+    {"path": "frontend/tsconfig.json", "language": "json", "sizeLines": 7, "fileCategory": "config"},
+    {"path": "frontend/tsconfig.node.json", "language": "json", "sizeLines": 24, "fileCategory": "config"},
+    {"path": "frontend/vite.config.ts", "language": "typescript", "sizeLines": 20, "fileCategory": "code"},
+    {"path": "plan.md", "language": "markdown", "sizeLines": 26, "fileCategory": "docs"},
+    {"path": "pyproject.toml", "language": "toml", "sizeLines": 42, "fileCategory": "config"},
+    {"path": "README.md", "language": "markdown", "sizeLines": 306, "fileCategory": "docs"},
+    {"path": "requirements.txt", "language": "txt", "sizeLines": 8, "fileCategory": "docs"},
+    {"path": "SCRIPT.md", "language": "markdown", "sizeLines": 60, "fileCategory": "docs"},
+    {"path": "setup.sh", "language": "shell", "sizeLines": 38, "fileCategory": "script"},
+    {"path": "SKILL.md", "language": "markdown", "sizeLines": 200, "fileCategory": "docs"},
+    {"path": "static/dashboard.html", "language": "html", "sizeLines": 1539, "fileCategory": "markup"}
+  ],
+  "totalFiles": 84,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "moderate",
+  "importMap": {
+    ".gitattributes": [],
+    ".github/workflows/ci.yml": [],
+    ".pre-commit-config.yaml": [],
+    "项目问题.md": [],
+    "backend/__init__.py": [],
+    "backend/app.py": [
+      "backend/autochat.py",
+      "backend/logger.py",
+      "backend/replier.py",
+      "backend/state.py"
+    ],
+    "backend/autochat.py": [
+      "backend/firefox.py",
+      "backend/logger.py",
+      "backend/state.py"
+    ],
+    "backend/firefox.py": [
+      "backend/logger.py"
+    ],
+    "backend/interview/llm_client.py": [],
+    "backend/logger.py": [],
+    "backend/mcp_server.py": [],
+    "backend/replier.py": [
+      "backend/logger.py",
+      "backend/state.py"
+    ],
+    "backend/scraper.py": [
+      "backend/logger.py"
+    ],
+    "backend/state.py": [],
+    "bosshelper_cli/__init__.py": [],
+    "bosshelper_cli/cli.py": [
+      "bosshelper_cli/client.py",
+      "bosshelper_cli/output.py"
+    ],
+    "bosshelper_cli/client.py": [],
+    "bosshelper_cli/output.py": [],
+    "bosshelper_cli/schema.json": [],
+    "CHANGELOG.md": [],
+    "config.yaml": [],
+    "CONTRIBUTING.md": [],
+    "docs/database.md": [],
+    "frontend/eslint.config.js": [],
+    "frontend/index.html": [],
+    "frontend/package.json": [],
+    "frontend/postcss.config.js": [],
+    "frontend/README.md": [],
+    "frontend/src/api/client.ts": [],
+    "frontend/src/api/conversations.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/jobs.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/scheduler.ts": [
+      "frontend/src/api/client.ts"
+    ],
+    "frontend/src/api/settings.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/shortlists.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/system.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/types.ts": [],
+    "frontend/src/api/wechat.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/App.tsx": [
+      "frontend/src/components/layout/PageHeader.tsx",
+      "frontend/src/components/layout/Sidebar.tsx",
+      "frontend/src/hooks/useWebSocket.ts",
+      "frontend/src/pages/ApplicationsPage.tsx",
+      "frontend/src/pages/AutomationPage.tsx",
+      "frontend/src/pages/ChatPage.tsx",
+      "frontend/src/pages/SearchPage.tsx",
+      "frontend/src/pages/SettingsPage.tsx",
+      "frontend/src/pages/WechatPage.tsx",
+      "frontend/src/stores/appStore.ts"
+    ],
+    "frontend/src/components/common/Badge.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Button.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Card.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/EmptyState.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Spinner.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/TimePicker.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Toggle.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/layout/PageHeader.tsx": [
+      "frontend/src/api/system.ts",
+      "frontend/src/stores/appStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/components/layout/Sidebar.tsx": [
+      "frontend/src/lib/cn.ts",
+      "frontend/src/stores/appStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/components/search/AnalyzeModal.tsx": [
+      "frontend/src/api/types.ts",
+      "frontend/src/components/common/Spinner.tsx",
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/search/FunnelBar.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/search/JobCard.tsx": [
+      "frontend/src/api/types.ts",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/lib/constants.ts"
+    ],
+    "frontend/src/components/search/SearchBar.tsx": [
+      "frontend/src/lib/constants.ts"
+    ],
+    "frontend/src/hooks/useWebSocket.ts": [
+      "frontend/src/api/conversations.ts",
+      "frontend/src/api/jobs.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/api/types.ts",
+      "frontend/src/stores/chatStore.ts",
+      "frontend/src/stores/jobsStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/schedulerStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/index.css": [],
+    "frontend/src/lib/cn.ts": [],
+    "frontend/src/lib/constants.ts": [],
+    "frontend/src/lib/utils.ts": [],
+    "frontend/src/main.tsx": [
+      "frontend/src/App.tsx",
+      "frontend/src/index.css"
+    ],
+    "frontend/src/pages/ApplicationsPage.tsx": [
+      "frontend/src/api/jobs.ts",
+      "frontend/src/api/shortlists.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/lib/constants.ts",
+      "frontend/src/stores/jobsStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/pages/AutomationPage.tsx": [
+      "frontend/src/api/scheduler.ts",
+      "frontend/src/components/common/TimePicker.tsx",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/lib/constants.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/schedulerStore.ts"
+    ],
+    "frontend/src/pages/ChatPage.tsx": [
+      "frontend/src/api/conversations.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/components/common/EmptyState.tsx",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/stores/chatStore.ts",
+      "frontend/src/stores/notificationStore.ts"
+    ],
+    "frontend/src/pages/SearchPage.tsx": [
+      "frontend/src/api/jobs.ts",
+      "frontend/src/api/shortlists.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/api/types.ts",
+      "frontend/src/components/common/EmptyState.tsx",
+      "frontend/src/components/search/AnalyzeModal.tsx",
+      "frontend/src/components/search/FunnelBar.tsx",
+      "frontend/src/components/search/JobCard.tsx",
+      "frontend/src/components/search/SearchBar.tsx",
+      "frontend/src/stores/jobsStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/settingsStore.ts"
+    ],
+    "frontend/src/pages/SettingsPage.tsx": [
+      "frontend/src/api/settings.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/lib/constants.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/settingsStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/pages/WechatPage.tsx": [
+      "frontend/src/api/types.ts",
+      "frontend/src/api/wechat.ts",
+      "frontend/src/components/common/EmptyState.tsx",
+      "frontend/src/lib/utils.ts",
+      "frontend/src/stores/notificationStore.ts"
+    ],
+    "frontend/src/stores/appStore.ts": [],
+    "frontend/src/stores/chatStore.ts": [
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/stores/jobsStore.ts": [
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/stores/notificationStore.ts": [],
+    "frontend/src/stores/schedulerStore.ts": [
+      "frontend/src/api/scheduler.ts"
+    ],
+    "frontend/src/stores/settingsStore.ts": [
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/stores/systemStore.ts": [
+      "frontend/src/api/system.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/vite-env.d.ts": [],
+    "frontend/tailwind.config.js": [],
+    "frontend/tsconfig.app.json": [],
+    "frontend/tsconfig.json": [],
+    "frontend/tsconfig.node.json": [],
+    "frontend/vite.config.ts": [],
+    "plan.md": [],
+    "pyproject.toml": [],
+    "README.md": [],
+    "requirements.txt": [],
+    "SCRIPT.md": [],
+    "setup.sh": [],
+    "SKILL.md": [],
+    "static/dashboard.html": []
+  }
+}

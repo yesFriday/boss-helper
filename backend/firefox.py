@@ -695,6 +695,27 @@ class BossScraper:
             filtered.append(j)
         return filtered
 
+    def _filter_by_hr_active(self, jobs, exclude_statuses=None):
+        """按 HR 活跃时间过滤，排除不活跃的 HR。
+        exclude_statuses: 要排除的活跃状态列表，如 ["半年前活跃", "一年前活跃"]
+        """
+        if not exclude_statuses:
+            return jobs
+        filtered = []
+        for j in jobs:
+            active = (j.get("hr_active_time") or "").strip()
+            if not active:
+                filtered.append(j)  # 没有活跃信息的保留
+                continue
+            should_exclude = False
+            for status in exclude_statuses:
+                if status in active:
+                    should_exclude = True
+                    break
+            if not should_exclude:
+                filtered.append(j)
+        return filtered
+
     def _extract_job_cards(self):
         """优先从岗位卡片 DOM 提取，避免正文行号变化导致链接和岗位错配。"""
         try:
@@ -732,6 +753,15 @@ class BossScraper:
                         || lines.find(x => x.includes('·') && x.length < 40) || '';
                     let experience = lines.find(x => /经验|应届|在校|不限/.test(x) && x.length < 30) || '';
                     let education = lines.find(x => /本科|硕士|博士|大专|学历不限|中专|高中/.test(x) && x.length < 30) || '';
+                    // HR 活跃时间
+                    let hrActiveTime = '';
+                    const onlineTag = card.querySelector('.boss-online-tag');
+                    if (onlineTag && onlineTag.textContent.trim() === '在线') {
+                        hrActiveTime = '在线';
+                    } else {
+                        const activeTimeEl = card.querySelector('.boss-active-time');
+                        hrActiveTime = activeTimeEl ? activeTimeEl.textContent.trim() : '';
+                    }
                     if (!company) {
                         company = lines.find(x =>
                             x !== title && x !== salary && x !== city &&
@@ -742,13 +772,14 @@ class BossScraper:
                     title = title.replace(/\\s+/g, ' ').trim();
                     if (title && salary) {
                         seen.add(href);
-                        cards.push({title, salary, company, city, experience, education, url: href});
+                        cards.push({title, salary, company, city, experience, education, url: href, hrActiveTime});
                     }
                 });
                 return cards;
             }""")
         except Exception:
             return []
+
 
         jobs = []
         seen = set()
@@ -770,6 +801,7 @@ class BossScraper:
                     "description": "",
                     "hr_name": "",
                     "hr_title": "",
+                    "hr_active_time": (row.get("hrActiveTime") or "").strip(),
                 }
             )
         return jobs

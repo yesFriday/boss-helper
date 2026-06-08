@@ -21,11 +21,11 @@ export function SearchPage() {
   const [analyzeResult, setAnalyzeResult] = useState<AnalyzeResult | null>(null)
   const [analyzeLoading, setAnalyzeLoading] = useState(false)
 
-  const handleSearch = async (keyword: string, city: string, welfare?: string, salaryExpect?: number, experienceExpect?: number) => {
+  const handleSearch = async (keyword: string, city: string, welfare?: string, salaryExpect?: number, experienceExpect?: number, excludeHrActive?: string) => {
     useJobsStore.getState().setSearchInFlight(true)
     useJobsStore.getState().setSearchStatusMessage('<div class="flex items-center gap-2"><span class="animate-spin">⏳</span> 搜索中...</div>')
     try {
-      const res = await jobsApi.searchJobs({ keyword, city, welfare, salary_expect: salaryExpect, experience_expect: experienceExpect })
+      const res = await jobsApi.searchJobs({ keyword, city, welfare, salary_expect: salaryExpect, experience_expect: experienceExpect, exclude_hr_active: excludeHrActive })
       useJobsStore.getState().setSearchStatusMessage(
         `<div class="text-emerald-600">找到 ${res.jobs_found} 条，已保存 ${res.saved} 条</div>`
       )

@@ -10,6 +10,7 @@ export interface Job {
   education: string
   hr_name: string
   hr_title: string
+  hr_active_time?: string
   description: string
   status: 'pending' | 'applied' | 'replied' | 'skipped' | 'failed' | 'missing_url'
 }

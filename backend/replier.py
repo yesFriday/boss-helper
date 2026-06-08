@@ -10,7 +10,7 @@ from pathlib import Path
 
 # 复用 interview/llm_client.py
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root / "interview"))
+sys.path.insert(0, str(project_root / "backend" / "interview"))
 from llm_client import llm_chat_deepseek
 
 from backend.state import get_recent_messages, get_setting

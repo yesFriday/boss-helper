@@ -2,7 +2,7 @@ import { api } from './client'
 import type { Job, AnalyzeResult } from './types'
 
 export const jobsApi = {
-  searchJobs: (data: { keyword: string; city: string; welfare?: string; salary_expect?: number; experience_expect?: number }) =>
+  searchJobs: (data: { keyword: string; city: string; welfare?: string; salary_expect?: number; experience_expect?: number; exclude_hr_active?: string }) =>
     api.post<{ jobs_found: number; saved: number; jobs: Job[] }>('/api/jobs/search', data),
 
   listJobs: (params?: { limit?: number; status?: string }) => {

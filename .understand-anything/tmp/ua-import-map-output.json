@@ -1,0 +1,252 @@
+{
+  "scriptCompleted": true,
+  "stats": {
+    "filesScanned": 84,
+    "filesWithImports": 40,
+    "totalEdges": 118
+  },
+  "importMap": {
+    ".gitattributes": [],
+    ".github/workflows/ci.yml": [],
+    ".pre-commit-config.yaml": [],
+    "项目问题.md": [],
+    "backend/__init__.py": [],
+    "backend/app.py": [
+      "backend/autochat.py",
+      "backend/logger.py",
+      "backend/replier.py",
+      "backend/state.py"
+    ],
+    "backend/autochat.py": [
+      "backend/firefox.py",
+      "backend/logger.py",
+      "backend/state.py"
+    ],
+    "backend/firefox.py": [
+      "backend/logger.py"
+    ],
+    "backend/interview/llm_client.py": [],
+    "backend/logger.py": [],
+    "backend/mcp_server.py": [],
+    "backend/replier.py": [
+      "backend/logger.py",
+      "backend/state.py"
+    ],
+    "backend/scraper.py": [
+      "backend/logger.py"
+    ],
+    "backend/state.py": [],
+    "bosshelper_cli/__init__.py": [],
+    "bosshelper_cli/cli.py": [
+      "bosshelper_cli/client.py",
+      "bosshelper_cli/output.py"
+    ],
+    "bosshelper_cli/client.py": [],
+    "bosshelper_cli/output.py": [],
+    "bosshelper_cli/schema.json": [],
+    "CHANGELOG.md": [],
+    "config.yaml": [],
+    "CONTRIBUTING.md": [],
+    "docs/database.md": [],
+    "frontend/eslint.config.js": [],
+    "frontend/index.html": [],
+    "frontend/package.json": [],
+    "frontend/postcss.config.js": [],
+    "frontend/README.md": [],
+    "frontend/src/api/client.ts": [],
+    "frontend/src/api/conversations.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/jobs.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/scheduler.ts": [
+      "frontend/src/api/client.ts"
+    ],
+    "frontend/src/api/settings.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/shortlists.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/system.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/api/types.ts": [],
+    "frontend/src/api/wechat.ts": [
+      "frontend/src/api/client.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/App.tsx": [
+      "frontend/src/components/layout/PageHeader.tsx",
+      "frontend/src/components/layout/Sidebar.tsx",
+      "frontend/src/hooks/useWebSocket.ts",
+      "frontend/src/pages/ApplicationsPage.tsx",
+      "frontend/src/pages/AutomationPage.tsx",
+      "frontend/src/pages/ChatPage.tsx",
+      "frontend/src/pages/SearchPage.tsx",
+      "frontend/src/pages/SettingsPage.tsx",
+      "frontend/src/pages/WechatPage.tsx",
+      "frontend/src/stores/appStore.ts"
+    ],
+    "frontend/src/components/common/Badge.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Button.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Card.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/EmptyState.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Spinner.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/TimePicker.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/common/Toggle.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/layout/PageHeader.tsx": [
+      "frontend/src/api/system.ts",
+      "frontend/src/stores/appStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/components/layout/Sidebar.tsx": [
+      "frontend/src/lib/cn.ts",
+      "frontend/src/stores/appStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/components/search/AnalyzeModal.tsx": [
+      "frontend/src/api/types.ts",
+      "frontend/src/components/common/Spinner.tsx",
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/search/FunnelBar.tsx": [
+      "frontend/src/lib/cn.ts"
+    ],
+    "frontend/src/components/search/JobCard.tsx": [
+      "frontend/src/api/types.ts",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/lib/constants.ts"
+    ],
+    "frontend/src/components/search/SearchBar.tsx": [
+      "frontend/src/lib/constants.ts"
+    ],
+    "frontend/src/hooks/useWebSocket.ts": [
+      "frontend/src/api/conversations.ts",
+      "frontend/src/api/jobs.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/api/types.ts",
+      "frontend/src/stores/chatStore.ts",
+      "frontend/src/stores/jobsStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/schedulerStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/index.css": [],
+    "frontend/src/lib/cn.ts": [],
+    "frontend/src/lib/constants.ts": [],
+    "frontend/src/lib/utils.ts": [],
+    "frontend/src/main.tsx": [
+      "frontend/src/App.tsx",
+      "frontend/src/index.css"
+    ],
+    "frontend/src/pages/ApplicationsPage.tsx": [
+      "frontend/src/api/jobs.ts",
+      "frontend/src/api/shortlists.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/lib/constants.ts",
+      "frontend/src/stores/jobsStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/pages/AutomationPage.tsx": [
+      "frontend/src/api/scheduler.ts",
+      "frontend/src/components/common/TimePicker.tsx",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/lib/constants.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/schedulerStore.ts"
+    ],
+    "frontend/src/pages/ChatPage.tsx": [
+      "frontend/src/api/conversations.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/components/common/EmptyState.tsx",
+      "frontend/src/lib/cn.ts",
+      "frontend/src/stores/chatStore.ts",
+      "frontend/src/stores/notificationStore.ts"
+    ],
+    "frontend/src/pages/SearchPage.tsx": [
+      "frontend/src/api/jobs.ts",
+      "frontend/src/api/shortlists.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/api/types.ts",
+      "frontend/src/components/common/EmptyState.tsx",
+      "frontend/src/components/search/AnalyzeModal.tsx",
+      "frontend/src/components/search/FunnelBar.tsx",
+      "frontend/src/components/search/JobCard.tsx",
+      "frontend/src/components/search/SearchBar.tsx",
+      "frontend/src/stores/jobsStore.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/settingsStore.ts"
+    ],
+    "frontend/src/pages/SettingsPage.tsx": [
+      "frontend/src/api/settings.ts",
+      "frontend/src/api/system.ts",
+      "frontend/src/lib/constants.ts",
+      "frontend/src/stores/notificationStore.ts",
+      "frontend/src/stores/settingsStore.ts",
+      "frontend/src/stores/systemStore.ts"
+    ],
+    "frontend/src/pages/WechatPage.tsx": [
+      "frontend/src/api/types.ts",
+      "frontend/src/api/wechat.ts",
+      "frontend/src/components/common/EmptyState.tsx",
+      "frontend/src/lib/utils.ts",
+      "frontend/src/stores/notificationStore.ts"
+    ],
+    "frontend/src/stores/appStore.ts": [],
+    "frontend/src/stores/chatStore.ts": [
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/stores/jobsStore.ts": [
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/stores/notificationStore.ts": [],
+    "frontend/src/stores/schedulerStore.ts": [
+      "frontend/src/api/scheduler.ts"
+    ],
+    "frontend/src/stores/settingsStore.ts": [
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/stores/systemStore.ts": [
+      "frontend/src/api/system.ts",
+      "frontend/src/api/types.ts"
+    ],
+    "frontend/src/vite-env.d.ts": [],
+    "frontend/tailwind.config.js": [],
+    "frontend/tsconfig.app.json": [],
+    "frontend/tsconfig.json": [],
+    "frontend/tsconfig.node.json": [],
+    "frontend/vite.config.ts": [],
+    "plan.md": [],
+    "pyproject.toml": [],
+    "README.md": [],
+    "requirements.txt": [],
+    "SCRIPT.md": [],
+    "setup.sh": [],
+    "SKILL.md": [],
+    "static/dashboard.html": []
+  }
+}

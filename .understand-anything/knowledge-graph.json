@@ -1,0 +1,464 @@
+{
+  "meta": {
+    "version": "2.0",
+    "projectName": "bosshelper",
+    "projectPath": "E:/githubproject/boss/lakejobai-job-radar",
+    "description": "AI 驱动的 BOSS 直聘智能求职助手，提供 Web 控制台 + CLI 双界面。支持 60+ 城市岗位搜索、福利筛选、一键批量投递、AI 自动接管聊天回复、自动交换微信/简历/电话、投递转化漏斗统计。",
+    "generatedAt": "2026-06-07",
+    "totalFiles": 84,
+    "languages": ["python", "typescript", "javascript", "html", "css", "json", "yaml", "markdown", "toml", "shell"],
+    "frameworks": ["FastAPI", "Playwright", "React", "Vite", "Tailwind CSS", "Zustand", "MCP", "SQLite", "Uvicorn"],
+    "estimatedComplexity": "moderate"
+  },
+  "architecture": {
+    "overview": "三层架构：前端(React SPA) -> 后端(FastAPI REST+WebSocket) -> 自动化层(Playwright浏览器控制)。CLI 通过 HTTP 客户端调用后端 API。MCP Server 挂载在 FastAPI 上供 AI Agent 调用。",
+    "layers": [
+      {
+        "name": "前端展示层",
+        "description": "React 19 + TypeScript + Tailwind CSS 单页应用，通过 REST API 和 WebSocket 与后端通信。使用 Zustand 管理全局状态。",
+        "modules": ["frontend/src"]
+      },
+      {
+        "name": "后端服务层",
+        "description": "FastAPI 提供 REST API + WebSocket 实时推送。管理岗位搜索、投递、聊天监控、定时调度等业务逻辑。SQLite 持久化数据。",
+        "modules": ["backend/app.py", "backend/state.py", "backend/replier.py", "backend/logger.py"]
+      },
+      {
+        "name": "浏览器自动化层",
+        "description": "Playwright + Firefox 持久化 Profile 控制 BOSS 直聘网页。BossScraper 负责搜索和数据采集，BossAutomation 继承并扩展交互能力（投递、聊天、换微信等）。",
+        "modules": ["backend/firefox.py", "backend/autochat.py"]
+      },
+      {
+        "name": "CLI 层",
+        "description": "Click 框架实现 14 条 CLI 命令，通过 httpx HTTP 客户端调用后端 API，stdout 输出 JSON，供 AI Agent 集成。",
+        "modules": ["bosshelper_cli/cli.py", "bosshelper_cli/client.py", "bosshelper_cli/output.py"]
+      },
+      {
+        "name": "MCP 协议层",
+        "description": "FastMCP Server 将 CLI 命令封装为 MCP Tools，供 AI Agent 通过标准 MCP 协议调用。挂载在 FastAPI 的 /mcp 路径。",
+        "modules": ["backend/mcp_server.py"]
+      },
+      {
+        "name": "AI 集成层",
+        "description": "LLM 客户端支持 DeepSeek/OpenRouter/小米MiMo 等 OpenAI 兼容 API。用于 AI 自动回复聊天、JD 匹配度分析、兴趣度评估。",
+        "modules": ["backend/interview/llm_client.py", "backend/replier.py"]
+      },
+      {
+        "name": "辅助爬虫层",
+        "description": "智联招聘爬虫（独立于 BOSS 直聘主流程），用于多平台岗位数据采集和技能差距分析。",
+        "modules": ["backend/scraper.py"]
+      }
+    ],
+    "dataFlow": "用户操作(Web/CLI) -> FastAPI REST -> Playwright浏览器控制 -> BOSS直聘网页 -> 数据回传 -> SQLite持久化 -> WebSocket实时推送前端"
+  },
+  "modules": [
+    {
+      "id": "backend/app",
+      "path": "backend/app.py",
+      "language": "python",
+      "sizeLines": 1488,
+      "role": "核心入口 - FastAPI 应用",
+      "description": "FastAPI 后端主应用。定义所有 REST API 端点（搜索、投递、聊天、设置、诊断等），WebSocket 实时推送，后台聊天监控循环，定时调度器。管理全局 BossAutomation 实例。",
+      "keyFunctions": [
+        {"name": "on_startup", "description": "应用启动时初始化浏览器锁、清理垃圾会话、启动监控和调度器"},
+        {"name": "start_automation", "description": "POST /api/system/start - 启动 Playwright 浏览器"},
+        {"name": "search_jobs", "description": "POST /api/jobs/search - 搜索岗位并存入数据库"},
+        {"name": "apply_to_job", "description": "POST /api/jobs/apply - 投递单个岗位"},
+        {"name": "apply_batch", "description": "POST /api/jobs/apply-batch - 批量投递"},
+        {"name": "analyze_jd", "description": "POST /api/jobs/analyze - AI 分析岗位 JD 匹配度"},
+        {"name": "chat_monitor_loop", "description": "后台轮询聊天消息 + 自动回复 + 心跳保活"},
+        {"name": "scheduler_loop", "description": "自动化调度器：搜索->连续投递->聊天监控，支持时间段控制"},
+        {"name": "websocket_endpoint", "description": "WS /ws - WebSocket 实时推送"},
+        {"name": "broadcast_ws", "description": "向所有 WebSocket 客户端广播消息"}
+      ],
+      "imports": ["backend/autochat", "backend/logger", "backend/replier", "backend/state"]
+    },
+    {
+      "id": "backend/autochat",
+      "path": "backend/autochat.py",
+      "language": "python",
+      "sizeLines": 1341,
+      "role": "浏览器自动化交互层",
+      "description": "BossAutomation 类继承 BossScraper，增加点击/输入/聊天等交互能力。包含自动投递、聊天监控、消息读取、AI 回复触发、微信/电话/简历交换等功能。定义了所有 BOSS 直聘页面的 CSS 选择器。",
+      "keyFunctions": [
+        {"name": "apply_to_job", "description": "单岗位投递流程：打开详情页->点击立即沟通->发送招呼语->记录数据库"},
+        {"name": "apply_batch", "description": "批量投递，带间隔延迟"},
+        {"name": "run_chat_monitor_cycle", "description": "完整监控周期：导航聊天页->扫描未读->打开会话->读消息->AI回复"},
+        {"name": "send_message", "description": "逐字模拟键盘输入 + Enter 发送"},
+        {"name": "send_wechat", "description": "通过 BOSS API 或按钮发起微信交换"},
+        {"name": "send_phone", "description": "通过 BOSS API 交换手机号"},
+        {"name": "send_resume", "description": "点击发简历按钮并确认"},
+        {"name": "open_conversation_by_name", "description": "按 HR 名字在聊天页定位并打开会话"},
+        {"name": "read_visible_messages", "description": "从 DOM 读取当前聊天窗口的可见消息"},
+        {"name": "check_page_safety", "description": "安全检查：验证码/登录失效/账号限制"},
+        {"name": "keep_alive", "description": "Session 保活：在聊天页保持活跃"},
+        {"name": "heartbeat", "description": "心跳检查登录状态"}
+      ],
+      "imports": ["backend/firefox", "backend/logger", "backend/state"]
+    },
+    {
+      "id": "backend/firefox",
+      "path": "backend/firefox.py",
+      "language": "python",
+      "sizeLines": 1091,
+      "role": "BOSS 直聘搜索与数据采集",
+      "description": "BossScraper 类封装 Playwright Firefox 浏览器操作。负责搜索列表页提取岗位信息、访问详情页提取 JD 和 HR 信息、反检测脚本注入、登录流程管理。包含完整的城市代码映射和技能词库。",
+      "keyFunctions": [
+        {"name": "start", "description": "启动 Firefox 持久化 Profile 浏览器"},
+        {"name": "login", "description": "扫码登录流程，保存 storage state"},
+        {"name": "search", "description": "搜索关键词，返回岗位列表（DOM 提取 + 正则兜底）"},
+        {"name": "fetch_detail", "description": "访问详情页提取 JD 和 HR 信息"},
+        {"name": "_filter_by_welfare", "description": "福利筛选（AND 逻辑）"},
+        {"name": "_filter_by_expect", "description": "按期望薪资和工作年限过滤"},
+        {"name": "_extract_job_cards", "description": "从 DOM 卡片元素提取岗位信息"},
+        {"name": "_scroll_all", "description": "持续滚动加载更多岗位"},
+        {"name": "is_logged_in_page", "description": "判断当前页面是否已登录"}
+      ],
+      "imports": ["backend/logger"]
+    },
+    {
+      "id": "backend/state",
+      "path": "backend/state.py",
+      "language": "python",
+      "sizeLines": 610,
+      "role": "SQLite 数据持久化层",
+      "description": "数据访问层，管理 SQLite 数据库。包含 5 张表：applications(岗位)、conversations(会话)、messages(消息)、settings(配置)、daily_stats(统计)、shortlists(候选池)。使用 WAL 模式和线程本地连接。",
+      "keyFunctions": [
+        {"name": "init_db", "description": "初始化数据库表结构和默认设置"},
+        {"name": "add_application", "description": "添加岗位记录"},
+        {"name": "get_or_create_conversation", "description": "获取或创建 HR 会话"},
+        {"name": "add_message", "description": "添加聊天消息"},
+        {"name": "replace_conversation_messages", "description": "用浏览器当前消息覆盖本地缓存"},
+        {"name": "get_setting / set_setting", "description": "配置项读写"},
+        {"name": "get_daily_stats", "description": "获取每日统计"},
+        {"name": "add_to_shortlist / list_shortlists", "description": "候选池管理"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "backend/replier",
+      "path": "backend/replier.py",
+      "language": "python",
+      "sizeLines": 221,
+      "role": "AI 回复生成",
+      "description": "调用 LLM API 为 BOSS 直聘聊天生成自动回复。每次回复同时评估 HR 兴趣度(high/medium/low)。支持多种回复风格。包含面试处理、简历/微信/电话发送的 prompt 策略。",
+      "keyFunctions": [
+        {"name": "generate_reply", "description": "根据 HR 消息生成 AI 回复和兴趣度评估"},
+        {"name": "generate_greeting", "description": "生成投递招呼语"},
+        {"name": "build_reply_context", "description": "构建回复上下文（公司、岗位、简历、历史消息）"}
+      ],
+      "imports": ["backend/logger", "backend/state"]
+    },
+    {
+      "id": "backend/llm_client",
+      "path": "backend/interview/llm_client.py",
+      "language": "python",
+      "sizeLines": 126,
+      "role": "LLM API 客户端",
+      "description": "统一的 LLM 调用客户端。支持 Ollama 本地模型和 OpenAI 兼容 API（DeepSeek/OpenRouter/MiMo 等）。配置从 SQLite settings 表懒加载。",
+      "keyFunctions": [
+        {"name": "llm_chat_deepseek", "description": "调用 OpenAI 兼容 API"},
+        {"name": "llm_chat_ollama", "description": "调用 Ollama 本地模型"},
+        {"name": "get_embedding", "description": "获取文本 embedding 向量"},
+        {"name": "_load_ai_config", "description": "从 SQLite 加载 AI 配置"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "backend/mcp_server",
+      "path": "backend/mcp_server.py",
+      "language": "python",
+      "sizeLines": 254,
+      "role": "MCP 协议服务器",
+      "description": "FastMCP Server 将后端 API 封装为 MCP Tools，供 AI Agent 通过标准 MCP 协议调用。包含搜索、投递、聊天、诊断等 11 个工具。",
+      "keyFunctions": [
+        {"name": "search_jobs", "description": "MCP Tool: 搜索岗位"},
+        {"name": "apply_job", "description": "MCP Tool: 投递岗位"},
+        {"name": "list_conversations", "description": "MCP Tool: 列出会话"},
+        {"name": "send_message", "description": "MCP Tool: 发送消息"},
+        {"name": "analyze_job", "description": "MCP Tool: AI 分析 JD"},
+        {"name": "manage_shortlist", "description": "MCP Tool: 候选池管理"},
+        {"name": "run_doctor", "description": "MCP Tool: 环境诊断"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "backend/scraper",
+      "path": "backend/scraper.py",
+      "language": "python",
+      "sizeLines": 547,
+      "role": "智联招聘爬虫（独立模块）",
+      "description": "智联招聘岗位采集工具，支持多关键词搜索、薪资/经验/学历过滤、技能分类、日报生成、MySQL 存储。与 BOSS 直聘主流程独立。",
+      "keyFunctions": [
+        {"name": "scrape_zhaopin", "description": "智联招聘岗位爬取"},
+        {"name": "classify", "description": "技能分类引擎"},
+        {"name": "render_md", "description": "生成 Markdown 日报"},
+        {"name": "main", "description": "主流程：爬取->过滤->出日报->存库"}
+      ],
+      "imports": ["backend/logger"]
+    },
+    {
+      "id": "backend/logger",
+      "path": "backend/logger.py",
+      "language": "python",
+      "sizeLines": 46,
+      "role": "统一日志配置",
+      "description": "控制台(INFO) + 文件(DEBUG)双输出日志。日志文件位于 .boss_profile/boss.log。",
+      "keyFunctions": [
+        {"name": "get_logger", "description": "获取模块专属 logger"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "bosshelper_cli/cli",
+      "path": "bosshelper_cli/cli.py",
+      "language": "python",
+      "sizeLines": 212,
+      "role": "CLI 命令入口",
+      "description": "Click 框架实现 14 条 CLI 命令。stdout 仅输出 JSON，AI Agent 友好。",
+      "keyFunctions": [
+        {"name": "search_cmd", "description": "搜索岗位"},
+        {"name": "apply_cmd / apply_batch_cmd", "description": "投递岗位"},
+        {"name": "conversations_cmd / chat_cmd", "description": "会话和聊天"},
+        {"name": "analyze_cmd", "description": "AI JD 分析"},
+        {"name": "shortlist_cmd", "description": "候选池管理"},
+        {"name": "server_cmd", "description": "服务管理"},
+        {"name": "doctor_cmd", "description": "环境诊断"}
+      ],
+      "imports": ["bosshelper_cli/client", "bosshelper_cli/output"]
+    },
+    {
+      "id": "bosshelper_cli/client",
+      "path": "bosshelper_cli/client.py",
+      "language": "python",
+      "sizeLines": 88,
+      "role": "CLI HTTP 客户端",
+      "description": "httpx HTTP 客户端封装，调用后端 FastAPI 的 REST API。",
+      "keyFunctions": [
+        {"name": "search / status / stats", "description": "GET/POST 请求封装"},
+        {"name": "apply_one / apply_batch", "description": "投递 API 调用"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "bosshelper_cli/output",
+      "path": "bosshelper_cli/output.py",
+      "language": "python",
+      "sizeLines": 43,
+      "role": "CLI 输出格式化",
+      "description": "JSON 信封输出格式化，统一 ok/fail 响应结构。",
+      "keyFunctions": [
+        {"name": "ok / fail / emit", "description": "构建和输出 JSON 响应"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "frontend/app",
+      "path": "frontend/src/App.tsx",
+      "language": "typescript",
+      "sizeLines": 38,
+      "role": "前端根组件",
+      "description": "React 根组件，路由切换 6 个页面（搜索、投递、聊天、微信、自动化、设置）。初始化 WebSocket 连接。",
+      "keyFunctions": [
+        {"name": "App", "description": "根组件，根据 activeTab 渲染对应页面"}
+      ],
+      "imports": ["frontend/src/components/layout/PageHeader", "frontend/src/components/layout/Sidebar", "frontend/src/hooks/useWebSocket", "frontend/src/pages/*", "frontend/src/stores/appStore"]
+    },
+    {
+      "id": "frontend/api-layer",
+      "path": "frontend/src/api/",
+      "language": "typescript",
+      "sizeLines": 247,
+      "role": "前端 API 客户端层",
+      "description": "TypeScript API 客户端，封装与后端 FastAPI 的 HTTP 通信。包含 jobs、conversations、settings、system、scheduler、shortlists、wechat 等模块。",
+      "keyFunctions": [
+        {"name": "client.ts", "description": "基础 HTTP 客户端（fetch 封装）"},
+        {"name": "types.ts", "description": "TypeScript 类型定义"},
+        {"name": "jobs.ts", "description": "岗位相关 API"},
+        {"name": "conversations.ts", "description": "会话相关 API"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "frontend/stores",
+      "path": "frontend/src/stores/",
+      "language": "typescript",
+      "sizeLines": 201,
+      "role": "前端状态管理",
+      "description": "Zustand 全局状态管理。包含 appStore(路由)、chatStore(聊天)、jobsStore(岗位)、notificationStore(通知)、schedulerStore(调度)、settingsStore(设置)、systemStore(系统)。",
+      "keyFunctions": [
+        {"name": "appStore", "description": "当前活跃 Tab 管理"},
+        {"name": "systemStore", "description": "浏览器运行状态"},
+        {"name": "jobsStore", "description": "岗位列表和搜索状态"},
+        {"name": "chatStore", "description": "聊天会话状态"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "frontend/pages",
+      "path": "frontend/src/pages/",
+      "language": "typescript",
+      "sizeLines": 1422,
+      "role": "前端页面组件",
+      "description": "6 个主要页面：SearchPage(搜索)、ApplicationsPage(投递管理)、ChatPage(聊天)、WechatPage(微信交换)、AutomationPage(定时调度)、SettingsPage(设置)。",
+      "keyFunctions": [
+        {"name": "SearchPage", "description": "岗位搜索、筛选、一键投递、JD 分析"},
+        {"name": "ApplicationsPage", "description": "投递记录管理、候选池"},
+        {"name": "ChatPage", "description": "HR 聊天界面、手动发消息、同步会话"},
+        {"name": "SettingsPage", "description": "AI 配置、招呼语、投递限制等设置"},
+        {"name": "AutomationPage", "description": "定时调度器配置和日志"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "frontend/hooks",
+      "path": "frontend/src/hooks/useWebSocket.ts",
+      "language": "typescript",
+      "sizeLines": 121,
+      "role": "WebSocket 钩子",
+      "description": "React Hook 管理 WebSocket 连接。接收后端实时推送（搜索完成、投递结果、新消息、自动回复等），更新对应 Zustand Store。",
+      "keyFunctions": [
+        {"name": "useWebSocket", "description": "建立 WebSocket 连接，分发事件到各 Store"}
+      ],
+      "imports": ["frontend/src/api/*", "frontend/src/stores/*"]
+    },
+    {
+      "id": "frontend/components",
+      "path": "frontend/src/components/",
+      "language": "typescript",
+      "sizeLines": 629,
+      "role": "前端组件库",
+      "description": "通用组件(Badge/Button/Card/EmptyState/Spinner/TimePicker/Toggle)、布局组件(Sidebar/PageHeader)、业务组件(JobCard/SearchBar/FunnelBar/AnalyzeModal)。",
+      "keyFunctions": [
+        {"name": "Sidebar", "description": "左侧导航栏"},
+        {"name": "JobCard", "description": "岗位卡片组件"},
+        {"name": "SearchBar", "description": "搜索栏组件"},
+        {"name": "AnalyzeModal", "description": "JD 分析弹窗"}
+      ],
+      "imports": []
+    },
+    {
+      "id": "static/dashboard",
+      "path": "static/dashboard.html",
+      "language": "html",
+      "sizeLines": 1539,
+      "role": "旧版单文件仪表盘",
+      "description": "旧版单文件 HTML + Vanilla JS 仪表盘，已被 React 前端替代。作为回退方案保留。",
+      "keyFunctions": [],
+      "imports": []
+    }
+  ],
+  "database": {
+    "engine": "SQLite (WAL mode)",
+    "path": ".boss_profile/boss_state.db",
+    "tables": [
+      {
+        "name": "applications",
+        "description": "岗位/投递记录表",
+        "columns": ["id", "job_title", "company", "salary", "job_url(UNIQUE)", "city", "experience", "education", "hr_name", "hr_title", "description", "status(pending/applied/skipped)", "greeting_text", "greeting_sent_at", "created_at", "updated_at"]
+      },
+      {
+        "name": "conversations",
+        "description": "HR 会话表",
+        "columns": ["id", "application_id(FK)", "hr_name", "hr_company", "job_title", "last_message_text", "last_message_from(hr/me)", "last_message_at", "unread_count", "status(active/closed)", "auto_reply_enabled", "interest_level(high/medium/low)", "hr_wechat", "wechat_shared_at", "resume_sent", "phone_shared", "created_at", "updated_at"]
+      },
+      {
+        "name": "messages",
+        "description": "聊天消息表",
+        "columns": ["id", "conversation_id(FK)", "sender(hr/me)", "content", "delivery_status", "ai_generated(0/1)", "created_at"]
+      },
+      {
+        "name": "settings",
+        "description": "系统配置表（键值对）",
+        "columns": ["key(PK)", "value", "updated_at"]
+      },
+      {
+        "name": "daily_stats",
+        "description": "每日统计表",
+        "columns": ["date(PK)", "applications_sent", "messages_sent", "messages_received", "auto_replies_sent"]
+      },
+      {
+        "name": "shortlists",
+        "description": "候选池表",
+        "columns": ["id", "job_url(UNIQUE)", "job_title", "company", "salary", "city", "note", "created_at"]
+      }
+    ]
+  },
+  "api_endpoints": {
+    "rest": [
+      {"method": "GET", "path": "/api/status", "description": "浏览器状态和今日统计"},
+      {"method": "GET", "path": "/api/stats", "description": "投递转化漏斗"},
+      {"method": "GET", "path": "/api/doctor", "description": "环境诊断"},
+      {"method": "POST", "path": "/api/jobs/search", "description": "搜索岗位"},
+      {"method": "GET", "path": "/api/jobs", "description": "岗位列表"},
+      {"method": "POST", "path": "/api/jobs/apply", "description": "投递单个"},
+      {"method": "POST", "path": "/api/jobs/apply-batch", "description": "批量投递"},
+      {"method": "POST", "path": "/api/jobs/analyze", "description": "AI JD 分析"},
+      {"method": "GET", "path": "/api/shortlists", "description": "候选池"},
+      {"method": "POST", "path": "/api/shortlists", "description": "添加收藏"},
+      {"method": "DELETE", "path": "/api/shortlists/{id}", "description": "取消收藏"},
+      {"method": "GET", "path": "/api/conversations", "description": "会话列表"},
+      {"method": "GET", "path": "/api/conversations/{id}", "description": "会话详情"},
+      {"method": "GET", "path": "/api/conversations/{id}/messages", "description": "聊天消息"},
+      {"method": "POST", "path": "/api/conversations/{id}/sync", "description": "同步浏览器消息"},
+      {"method": "POST", "path": "/api/conversations/{id}/send", "description": "手动发消息"},
+      {"method": "GET", "path": "/api/settings", "description": "读取设置"},
+      {"method": "PUT", "path": "/api/settings", "description": "更新设置"},
+      {"method": "POST", "path": "/api/system/start", "description": "启动浏览器"},
+      {"method": "POST", "path": "/api/system/stop", "description": "停止浏览器"},
+      {"method": "POST", "path": "/api/system/relogin", "description": "重新扫码"},
+      {"method": "GET", "path": "/api/scheduler", "description": "调度器配置"},
+      {"method": "PUT", "path": "/api/scheduler", "description": "更新调度器"},
+      {"method": "GET", "path": "/api/wechat-exchanges", "description": "微信交换记录"}
+    ],
+    "websocket": [
+      {"path": "/ws", "description": "实时推送：search_complete, apply_complete, new_messages, auto_reply_sent, scheduler_tick, settings_updated 等事件"}
+    ],
+    "mcp": [
+      {"path": "/mcp", "description": "MCP Streamable HTTP Server，11 个 Tools：search_jobs, get_status, get_stats, list_jobs, apply_job, apply_batch, list_conversations, get_chat, send_message, analyze_job, manage_shortlist, run_doctor"}
+    ]
+  },
+  "cli_commands": [
+    {"command": "bosshelper search", "description": "搜索岗位"},
+    {"command": "bosshelper status", "description": "浏览器状态 + 今日统计"},
+    {"command": "bosshelper stats", "description": "投递转化漏斗"},
+    {"command": "bosshelper jobs", "description": "岗位列表"},
+    {"command": "bosshelper apply", "description": "投递单个"},
+    {"command": "bosshelper apply-batch", "description": "批量投递"},
+    {"command": "bosshelper conversations", "description": "HR 会话列表"},
+    {"command": "bosshelper chat", "description": "查看聊天记录"},
+    {"command": "bosshelper send", "description": "手动发消息"},
+    {"command": "bosshelper analyze", "description": "AI 分析岗位匹配度"},
+    {"command": "bosshelper shortlist", "description": "候选池增删查"},
+    {"command": "bosshelper schema", "description": "输出工具描述 JSON"},
+    {"command": "bosshelper doctor", "description": "环境诊断"},
+    {"command": "bosshelper server", "description": "管理后台服务"}
+  ],
+  "key_dependencies": {
+    "backend": ["fastapi", "uvicorn", "playwright", "beautifulsoup4", "lxml", "pyyaml", "httpx", "mcp"],
+    "frontend": ["react", "react-dom", "zustand", "clsx", "lucide-react", "tailwind-merge", "tailwindcss", "vite", "typescript"],
+    "dev": ["ruff", "pytest", "eslint"]
+  },
+  "config_files": [
+    {"path": "config.yaml", "description": "浏览器配置（headless、profile_dir）"},
+    {"path": "pyproject.toml", "description": "Python 打包和 CLI 入口"},
+    {"path": "frontend/package.json", "description": "前端依赖和构建脚本"},
+    {"path": "frontend/vite.config.ts", "description": "Vite 构建配置"},
+    {"path": "frontend/tailwind.config.js", "description": "Tailwind CSS 配置"},
+    {"path": ".pre-commit-config.yaml", "description": "Pre-commit hooks"},
+    {"path": ".github/workflows/ci.yml", "description": "GitHub Actions CI"}
+  ],
+  "security_notes": [
+    "反检测：注入 AntiDetect 脚本隐藏 webdriver 标记、伪造 navigator 属性、canvas/WebGL 指纹干扰",
+    "合规边界：仅限个人账号使用，每日投递上限（默认15条），触发风控立即停止",
+    "BOSS 聊天内容过滤：微信号编码绕过（-- 替换为 一一）",
+    "安全检查：验证码/登录失效/账号限制/操作频率检测"
+  ],
+  "scan_result": {
+    "totalFiles": 84,
+    "filteredByIgnore": 0,
+    "estimatedComplexity": "moderate",
+    "byCategory": {"code": 61, "infra": 1, "config": 8, "docs": 10, "markup": 3, "script": 1},
+    "byLanguage": {"unknown": 1, "yaml": 3, "markdown": 9, "python": 14, "json": 5, "javascript": 3, "html": 2, "typescript": 43, "css": 1, "toml": 1, "txt": 1, "shell": 1}
+  }
+}

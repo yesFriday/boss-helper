@@ -40,6 +40,7 @@ def init_db():
             education TEXT,                                 -- 学历要求，如"本科"
             hr_name TEXT,                                   -- HR姓名
             hr_title TEXT,                                  -- HR职位，如"招聘经理"
+            hr_active_time TEXT,                            -- HR活跃时间，如"刚刚活跃"、"在线"
             description TEXT,                               -- 岗位描述/JD全文
             status TEXT DEFAULT 'pending',                  -- 状态：pending=待投递, applied=已投递, skipped=已跳过
             greeting_text TEXT,                             -- 发送的招呼语内容
@@ -121,6 +122,10 @@ def init_db():
         db.execute("ALTER TABLE conversations ADD COLUMN phone_shared INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    try:
+        db.execute("ALTER TABLE applications ADD COLUMN hr_active_time TEXT")
+    except sqlite3.OperationalError:
+        pass
     # 候选池表
     db.executescript("""
         CREATE TABLE IF NOT EXISTS shortlists (
@@ -178,8 +183,8 @@ def add_application(job: dict) -> int:
     db = get_db()
     cur = db.execute(
         """INSERT OR IGNORE INTO applications
-           (job_title, company, salary, job_url, city, experience, education, hr_name, hr_title, description)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (job_title, company, salary, job_url, city, experience, education, hr_name, hr_title, hr_active_time, description)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             job.get("title", ""),
             job.get("company", ""),
@@ -190,6 +195,7 @@ def add_application(job: dict) -> int:
             job.get("education", ""),
             job.get("hr_name", ""),
             job.get("hr_title", ""),
+            job.get("hr_active_time", ""),
             job.get("description", ""),
         ),
     )
@@ -216,6 +222,7 @@ def update_application_from_job(app_id: int, job: dict) -> Optional[dict]:
         "education": job.get("education", ""),
         "hr_name": job.get("hr_name", ""),
         "hr_title": job.get("hr_title", ""),
+        "hr_active_time": job.get("hr_active_time", ""),
         "description": job.get("description", ""),
     }
     params = []

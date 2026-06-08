@@ -261,6 +261,7 @@ class SearchRequest(BaseModel):
     welfare: Optional[str] = None  # 福利筛选 如 "双休,五险一金"
     salary_expect: Optional[int] = None  # 期望薪资(K)，闭区间判断
     experience_expect: Optional[int] = None  # 工作年限(年)，闭区间判断
+    exclude_hr_active: Optional[str] = None  # 排除HR活跃状态，如 "半年前活跃,一年前活跃"
     limit: int = 60
 
 
@@ -654,6 +655,11 @@ async def search_jobs(req: SearchRequest):
         # 薪资和经验筛选
         if req.salary_expect is not None or req.experience_expect is not None:
             jobs = automation._filter_by_expect(jobs, req.salary_expect, req.experience_expect)
+
+        # HR 活跃度筛选
+        if req.exclude_hr_active:
+            exclude_list = [s.strip() for s in req.exclude_hr_active.split(",") if s.strip()]
+            jobs = automation._filter_by_hr_active(jobs, exclude_list)
 
         saved_ids = []
         result_jobs = []
