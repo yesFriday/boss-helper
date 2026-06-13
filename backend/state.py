@@ -157,7 +157,7 @@ def init_db():
             "enabled": False,
             "days": [],
             "time_ranges": [],
-            "auto_apply": {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30},
+            "auto_apply": {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"},
             "auto_reply": {"style": "professional"},
         }),
     }
@@ -311,6 +311,96 @@ def get_pending_applications(limit: int = 50) -> List[dict]:
         )
         .fetchall()
     )
+
+
+def get_pending_applications_by_activity(
+    limit: int = 50, hr_active_filter: str = "all"
+) -> List[dict]:
+    """
+    按 HR 活跃度优先级排序获取待投岗位。
+    hr_active_filter:
+      - "all" / ""  → 所有待投岗位（按活跃度排序）
+      - "online"     → 只看在线/刚刚活跃/今日活跃的（兼容旧版）
+      - "recent"     → 只看在线/刚刚活跃/今日活跃/本周活跃的（兼容旧版）
+      - "在线,刚刚活跃" → 逗号分隔列表，只看列出的状态
+    """
+    db = get_db()
+
+    # 活跃度优先级：在线 > 刚刚活跃 > 今日活跃 > 本周活跃 > 本月活跃 > 其他
+    if hr_active_filter == "online":
+        rows = db.execute(
+            """SELECT * FROM applications
+               WHERE status='pending' AND job_url!=''
+                 AND hr_active_time IN ('在线', '刚刚活跃', '今日活跃')
+               ORDER BY
+                 CASE hr_active_time
+                   WHEN '在线' THEN 0
+                   WHEN '刚刚活跃' THEN 1
+                   WHEN '今日活跃' THEN 2
+                   ELSE 3
+                 END, id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    elif hr_active_filter == "recent":
+        rows = db.execute(
+            """SELECT * FROM applications
+               WHERE status='pending' AND job_url!=''
+                 AND hr_active_time IN ('在线', '刚刚活跃', '今日活跃', '本周活跃')
+               ORDER BY
+                 CASE hr_active_time
+                   WHEN '在线' THEN 0
+                   WHEN '刚刚活跃' THEN 1
+                   WHEN '今日活跃' THEN 2
+                   WHEN '本周活跃' THEN 3
+                   ELSE 4
+                 END, id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    elif hr_active_filter and hr_active_filter not in ("all", ""):
+        # 逗号分隔列表，如 "在线,刚刚活跃,今日活跃"
+        statuses = [s.strip() for s in hr_active_filter.split(",") if s.strip()]
+        if statuses:
+            placeholders = ",".join(["?"] * len(statuses))
+            rows = db.execute(
+                f"""SELECT * FROM applications
+                   WHERE status='pending' AND job_url!=''
+                     AND hr_active_time IN ({placeholders})
+                   ORDER BY
+                     CASE hr_active_time
+                       WHEN '在线' THEN 0
+                       WHEN '刚刚活跃' THEN 1
+                       WHEN '今日活跃' THEN 2
+                       WHEN '3日内活跃' THEN 3
+                       WHEN '本周活跃' THEN 4
+                       WHEN '本月活跃' THEN 5
+                       ELSE 6
+                     END, id
+                   LIMIT ?""",
+                (*statuses, limit),
+            ).fetchall()
+        else:
+            rows = []
+    else:  # "all" — 全部按活跃度排序，活跃度高的优先
+        rows = db.execute(
+            """SELECT * FROM applications
+               WHERE status='pending' AND job_url!=''
+               ORDER BY
+                 CASE
+                   WHEN hr_active_time IS NULL OR hr_active_time = '' THEN 99
+                   WHEN hr_active_time = '在线' THEN 0
+                   WHEN hr_active_time = '刚刚活跃' THEN 1
+                   WHEN hr_active_time = '今日活跃' THEN 2
+                   WHEN hr_active_time = '本周活跃' THEN 3
+                   WHEN hr_active_time = '本月活跃' THEN 4
+                   ELSE 5
+                 END, id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    return _rows_to_list(rows)
 
 
 # ══════════════════════════════════════

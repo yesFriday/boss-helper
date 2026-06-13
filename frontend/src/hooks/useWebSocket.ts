@@ -11,13 +11,16 @@ import { conversationsApi } from '../api/conversations'
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryCountRef = useRef(0)
+  const mountedRef = useRef(true)
 
   const handleMessage = useCallback(async (msg: WSMessage) => {
     const { addToast } = useNotificationStore.getState()
 
     switch (msg.type) {
       case 'connected':
+        retryCountRef.current = 0
         useSystemStore.getState().updateFromStatus(msg.status as any)
         break
       case 'search_complete':
@@ -93,9 +96,15 @@ export function useWebSocket() {
   }, [])
 
   const connect = useCallback(() => {
+    if (!mountedRef.current) return
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${location.host}/ws`)
     wsRef.current = ws
+
+    ws.onopen = () => {
+      retryCountRef.current = 0
+    }
 
     ws.onmessage = (e) => {
       try {
@@ -105,17 +114,33 @@ export function useWebSocket() {
     }
 
     ws.onclose = () => {
-      reconnectTimerRef.current = window.setTimeout(connect, 3000)
+      wsRef.current = null
+      if (!mountedRef.current) return
+
+      const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000)
+      retryCountRef.current += 1
+      reconnectTimerRef.current = setTimeout(connect, delay)
     }
 
-    ws.onerror = () => ws.close()
+    ws.onerror = () => {
+      wsRef.current?.close()
+    }
   }, [handleMessage])
 
   useEffect(() => {
+    mountedRef.current = true
     connect()
     return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
-      wsRef.current?.close()
+      mountedRef.current = false
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.close()
+        wsRef.current = null
+      }
     }
   }, [connect])
 }

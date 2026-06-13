@@ -8,6 +8,7 @@ export interface SchedulerConfig {
     keyword: string
     city: string
     daily_limit: number
+    hr_active_filter: string
   }
   auto_reply: {
     style: string

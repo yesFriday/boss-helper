@@ -1,5 +1,6 @@
 import { Sidebar } from './components/layout/Sidebar'
 import { PageHeader } from './components/layout/PageHeader'
+import { ToastContainer } from './components/common/ToastContainer'
 import { SearchPage } from './pages/SearchPage'
 import { ApplicationsPage } from './pages/ApplicationsPage'
 import { ChatPage } from './pages/ChatPage'
@@ -32,6 +33,7 @@ function App() {
         <PageHeader />
         {renderPage()}
       </main>
+      <ToastContainer />
     </div>
   )
 }

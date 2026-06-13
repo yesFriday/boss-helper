@@ -5,7 +5,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   enabled: false,
   days: [],
   time_ranges: [],
-  auto_apply: { keyword: 'AI Agent', city: '淄博', daily_limit: 30 },
+  auto_apply: { keyword: 'AI Agent', city: '淄博', daily_limit: 30, hr_active_filter: '在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃' },
   auto_reply: { style: 'professional' },
 }
 

@@ -51,6 +51,7 @@ from backend.state import (
     get_wechat_exchanges,
     get_today_pending_count,
     get_pending_applications,
+    get_pending_applications_by_activity,
     count_hours_replied_in_range,
     count_interest_level,
     add_to_shortlist,
@@ -84,6 +85,7 @@ ws_clients: List[WebSocket] = []
 monitor_paused: bool = False
 scheduler_enabled: bool = False
 browser_sync_lock: Optional[asyncio.Lock] = None
+search_cancelled: bool = False  # 搜索取消标志
 
 
 @app.on_event("startup")
@@ -129,14 +131,13 @@ _playwright_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw"
 
 
 async def _run_pw(fn, *args):
-    """在 Playwright 专属线程中执行同步操作，清除该线程的 asyncio 状态。"""
+    """在 Playwright 专属线程中执行同步操作，彻底清除该线程的 asyncio 状态。"""
 
     def _wrapper():
-        # Playwright sync API 检测到 event loop 会拒绝运行，先清掉
-        try:
-            asyncio.set_event_loop(None)
-        except Exception:
-            pass
+        import asyncio
+        # Python 3.14 + uvicorn 可能继承事件循环策略，重置掉
+        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+        asyncio.set_event_loop(None)
         return fn(*args)
 
     loop = asyncio.get_running_loop()
@@ -633,11 +634,23 @@ def list_jobs(status: Optional[str] = None, limit: int = 100):
     return {"jobs": jobs, "total": len(jobs)}
 
 
+@app.post("/api/jobs/search/cancel")
+async def cancel_search():
+    global search_cancelled
+    search_cancelled = True
+    if automation:
+        automation.search_cancelled = True
+    log.info("[搜索] 用户取消搜索")
+    return {"status": "cancelled"}
+
+
 @app.post("/api/jobs/search")
 async def search_jobs(req: SearchRequest):
-    global monitor_paused
+    global monitor_paused, search_cancelled
+    search_cancelled = False  # 重置取消标志
     if not automation or automation.page is None:
         raise HTTPException(status_code=503, detail="浏览器未启动，请先到设置Tab点击「启动浏览器」")
+    automation.search_cancelled = False  # 重置自动化对象的取消标志
     was_paused = monitor_paused
     monitor_paused = True
     try:
@@ -1117,7 +1130,7 @@ def get_scheduler_config():
         config = {}
     config.setdefault("days", [])
     config.setdefault("time_ranges", [])
-    config.setdefault("auto_apply", {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30})
+    config.setdefault("auto_apply", {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"})
     config.setdefault("auto_reply", {"style": "professional"})
     config["enabled"] = scheduler_enabled
     return {"config": config}
@@ -1202,6 +1215,7 @@ async def scheduler_loop():
             city = auto_cfg.get("city", "淄博")
             city_code = CITY_MAP.get(city, "100010000")
             daily_limit = auto_cfg.get("daily_limit", 30)
+            hr_active_filter = auto_cfg.get("hr_active_filter", "all")
 
             # 暂停聊天监控，避免浏览器冲突
             global monitor_paused
@@ -1210,7 +1224,7 @@ async def scheduler_loop():
 
             try:
                 # 搜索：数据库没有待投岗位才搜索
-                pending = get_pending_applications(1)
+                pending = get_pending_applications_by_activity(1, hr_active_filter)
                 if not pending:
                     _scheduler_phase = "searching"
                     try:
@@ -1233,7 +1247,7 @@ async def scheduler_loop():
                         break
 
                     remaining = daily_limit - applied
-                    pending = get_pending_applications(remaining)
+                    pending = get_pending_applications_by_activity(remaining, hr_active_filter)
 
                     # 没有待投岗位 → 补充搜索
                     if not pending:
@@ -1245,7 +1259,7 @@ async def scheduler_loop():
                         except Exception as e:
                             log.error(f"[调度器] 补充搜索失败: {e}", exc_info=True)
                             break
-                        pending = get_pending_applications(remaining)
+                        pending = get_pending_applications_by_activity(remaining, hr_active_filter)
                         if not pending:
                             entry = _add_scheduler_log(["无更多待投岗位"])
                             await broadcast_ws({"type": "scheduler_tick", "log": entry})
@@ -1344,8 +1358,8 @@ async def chat_monitor_loop():
     except Exception as e:
         log.warning(f"[监控] AI 回复系统加载失败: {e}")
 
-    # 首次立即跑一轮监控，不等延迟
-    if automation:
+    # 首次立即跑一轮监控，不等延迟（暂停时不执行）
+    if automation and not monitor_paused:
         log.info("[监控] 执行首次会话扫描...")
         try:
             result = await _run_pw(automation.run_chat_monitor_cycle)

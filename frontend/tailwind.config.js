@@ -10,6 +10,12 @@ export default {
           dark: '#4f46e5',
         },
       },
+      width: {
+        70: '17.5rem',
+      },
+      borderWidth: {
+        3: '3px',
+      },
       animation: {
         'slide-in': 'slideIn 0.3s ease',
         'fade-in': 'fadeIn 0.2s ease',

@@ -5,6 +5,8 @@ export const jobsApi = {
   searchJobs: (data: { keyword: string; city: string; welfare?: string; salary_expect?: number; experience_expect?: number; exclude_hr_active?: string }) =>
     api.post<{ jobs_found: number; saved: number; jobs: Job[] }>('/api/jobs/search', data),
 
+  cancelSearch: () => api.post<{ status: string }>('/api/jobs/search/cancel'),
+
   listJobs: (params?: { limit?: number; status?: string }) => {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.set('limit', String(params.limit))

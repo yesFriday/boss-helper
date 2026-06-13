@@ -110,6 +110,7 @@ export interface Shortlist {
   company: string
   salary: string
   city: string
+  hr_active_time?: string
 }
 
 export interface BatchProgress {

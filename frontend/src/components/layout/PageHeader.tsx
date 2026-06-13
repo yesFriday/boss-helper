@@ -1,4 +1,5 @@
 import { Play, Square } from 'lucide-react'
+import { Button } from '../common/Button'
 import { useAppStore } from '../../stores/appStore'
 import { useSystemStore } from '../../stores/systemStore'
 import { systemApi } from '../../api/system'
@@ -45,22 +46,24 @@ export function PageHeader() {
         {pageTitles[activeTab] || ''}
       </h2>
       <div className="flex gap-2">
-        <button
+        <Button
           onClick={handleStart}
           disabled={browserRunning}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none cursor-pointer"
+          size="sm"
+          variant="success"
         >
-          <Play size={16} />
+          <Play size={14} />
           启动浏览器
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleStop}
           disabled={!browserRunning}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-red-500 to-red-600 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none cursor-pointer"
+          size="sm"
+          variant="danger"
         >
-          <Square size={16} />
+          <Square size={14} />
           停止
-        </button>
+        </Button>
       </div>
     </div>
   )

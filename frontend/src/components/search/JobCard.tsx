@@ -1,6 +1,6 @@
 import { Send, BarChart3, Star } from 'lucide-react'
 import type { Job } from '../../api/types'
-import { STATUS_MAP, STATUS_BADGE_CLASS } from '../../lib/constants'
+import { STATUS_MAP, STATUS_BADGE_CLASS, HR_ACTIVE_BADGE_CLASS } from '../../lib/constants'
 import { cn } from '../../lib/cn'
 
 interface JobCardProps {
@@ -34,6 +34,11 @@ export function JobCard({ job, onApply, onAnalyze, onShortlist }: JobCardProps) 
           <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold', STATUS_BADGE_CLASS[status])}>
             {STATUS_MAP[status]}
           </span>
+          {job.hr_active_time && (
+            <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold border', HR_ACTIVE_BADGE_CLASS[job.hr_active_time] || 'bg-gray-100 text-gray-500 border-gray-200')}>
+              {job.hr_active_time}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex gap-2 flex-shrink-0">

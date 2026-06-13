@@ -11,7 +11,7 @@ import { jobsApi } from '../api/jobs'
 import { shortlistsApi } from '../api/shortlists'
 import { systemApi } from '../api/system'
 import type { Job, AnalyzeResult } from '../api/types'
-import { Search } from 'lucide-react'
+import { Search, Square } from 'lucide-react'
 
 export function SearchPage() {
   const { searchJobs, searchInFlight, searchStatusMessage, funnel } = useJobsStore()
@@ -119,6 +119,17 @@ export function SearchPage() {
     }
   }
 
+  const handleCancelSearch = async () => {
+    try {
+      await jobsApi.cancelSearch()
+      useJobsStore.getState().setSearchStatusMessage(
+        '<div class="text-amber-600">搜索已停止</div>'
+      )
+    } catch {
+      addToast('取消失败', 'error')
+    }
+  }
+
   const handleShortlist = async (job: Job) => {
     try {
       await shortlistsApi.addShortlist({
@@ -144,7 +155,18 @@ export function SearchPage() {
       />
 
       {searchStatusMessage && (
-        <div className="mb-4 p-3 bg-white rounded-lg border border-slate-200 text-sm" dangerouslySetInnerHTML={{ __html: searchStatusMessage }} />
+        <div className="mb-4 p-3 bg-white rounded-lg border border-slate-200 text-sm flex items-center justify-between">
+          <div dangerouslySetInnerHTML={{ __html: searchStatusMessage }} />
+          {searchInFlight && (
+            <button
+              onClick={handleCancelSearch}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 transition-all cursor-pointer"
+            >
+              <Square size={12} />
+              停止搜索
+            </button>
+          )}
+        </div>
       )}
 
       {funnel.pending > 0 && (

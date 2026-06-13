@@ -13,13 +13,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<Variant, string> = {
   primary:
-    'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:from-blue-600 hover:to-indigo-600 active:scale-[0.97]',
+    'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.97]',
   success:
-    'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:from-emerald-600 hover:to-teal-600 active:scale-[0.97]',
+    'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.97]',
   danger:
-    'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg shadow-rose-500/30 hover:shadow-rose-500/50 hover:from-rose-600 hover:to-pink-600 active:scale-[0.97]',
+    'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.97]',
   secondary:
-    'bg-white/80 text-gray-700 border border-gray-200 shadow-sm hover:bg-gray-50 hover:border-gray-300 active:scale-[0.97] backdrop-blur-sm',
+    'bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-[0.97]',
 }
 
 const sizeStyles: Record<Size, string> = {
@@ -36,6 +36,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || loading}
         className={cn(
           'inline-flex items-center justify-center font-semibold transition-all duration-200 ease-out',
+          'focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none',
           'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
           variantStyles[variant],
           sizeStyles[size],

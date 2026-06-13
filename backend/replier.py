@@ -1,22 +1,43 @@
 #!/usr/bin/env python3
 """
-AI 回复生成 —— 调用 DeepSeek API 为 BOSS直聘聊天生成自动回复。
-每次回复同时由 DeepSeek 根据对话上下文评估 HR 兴趣度 (high/medium/low)。
+AI 回复生成 —— 使用 LangChain 调用大模型为 BOSS直聘聊天生成自动回复。
+每次回复同时由 LLM 根据对话上下文评估 HR 兴趣度 (high/medium/low)。
+
+LangChain 重构要点：
+- ChatPromptTemplate   → 替代手工拼接字符串
+- PydanticOutputParser → 替代手工 json.loads + 正则兜底
+- get_llm()            → 替代手工 httpx.post
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
-# 复用 interview/llm_client.py
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
+
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "backend" / "interview"))
-from llm_client import llm_chat_deepseek
+from llm_client import get_llm
 
 from backend.state import get_recent_messages, get_setting
 from backend.logger import get_logger
 
 log = get_logger("replier")
+
+
+# ── Pydantic 输出模型 ──
+class ReplyOutput(BaseModel):
+    """LLM 回复结构体，PydanticOutputParser 自动校验类型"""
+
+    reply: str = Field(description="回复内容，2-4句话，自然真诚")
+    interest: str = Field(description="HR兴趣度评估: high / medium / low")
+
+
+# ── 输出解析器（自动注入 JSON Schema 到 System Prompt，自动解析返回值） ──
+output_parser = PydanticOutputParser(pydantic_object=ReplyOutput)
 
 SYSTEM_PROMPT = """你是一个求职者开发的AI助手，在BOSS直聘上帮他自动与招聘方沟通。
 
@@ -64,8 +85,7 @@ SYSTEM_PROMPT = """你是一个求职者开发的AI助手，在BOSS直聘上帮�
 - 不要重复说"已发送"，如果之前已经发过，就不再提
 - 这些操作会在你回复之前执行，所以你说"已发送"时东西确实已经发出去了
 
-## 输出格式（严格JSON）
-{"reply": "你的回复内容", "interest": "high/medium/low"}
+{format_instructions}
 
 interest 评估标准（根据完整对话判断HR当前兴趣程度）：
 - high: HR问了技术细节、项目经历、面试时间、薪资期望、要了微信、表达了明确合作意向
@@ -77,15 +97,13 @@ def _encode_wechat(wechat_id: str) -> str:
     """把微信号编码，绕开 BOSS 直聘的聊天内容过滤。"""
     if not wechat_id:
         return ""
-    result = wechat_id
-    result = result.replace("--", "一一")
-    result = result.replace("-", "一")
-    return result
+    return wechat_id.replace("--", "一一").replace("-", "一")
 
 
 def build_reply_context(
     conversation_id: int, hr_message: str, job_info: dict, resume_summary: str, wechat_id: str = ""
 ) -> str:
+    """构建发送给 LLM 的上下文文本"""
     parts = []
 
     parts.append(f"招聘方公司: {job_info.get('company', '未知')}")
@@ -113,7 +131,6 @@ def build_reply_context(
             parts.append(f"  {sender_label}{ai_tag}: {m['content'][:200]}")
 
     parts.append(f"\nHR刚刚说: {hr_message}")
-    parts.append("\n请以JSON格式输出回复和兴趣度: {\"reply\": \"...\", \"interest\": \"high/medium/low\"}")
 
     return "\n".join(parts)
 
@@ -129,19 +146,25 @@ def generate_reply(
     """
     根据 HR 消息生成 AI 回复和兴趣度评估。
     返回 (reply_text, interest_level) 元组，失败时返回 ("", "").
+
+    使用 LangChain 输出解析器自动校验 JSON 格式，
+    解析失败时降级到正则兜底。
     """
     if not hr_message or len(hr_message.strip()) < 1:
         return "", ""
 
     hr_lower = hr_message.strip().lower()
-    if hr_lower in ("你好", "您好", "hi", "hello", "嗨", "在吗", "在吗？", "在不在", "在不在？"):
+    if hr_lower in (
+        "你好", "您好", "hi", "hello", "嗨", "在吗", "在吗？", "在不在", "在不在？",
+    ):
         company = job_info.get("company", "贵公司")
         title = job_info.get("title", "相关岗位")
         desc_hint = ""
         if job_info.get("description"):
-            desc_hint = f"，看了JD感觉挺对口的"
+            desc_hint = "，看了JD感觉挺对口的"
         return (
-            f"您好！看到贵司在招{title}，挺感兴趣的{desc_hint}。PS：正在和你聊的这个AI是我自己开发的，算是我的技术名片～",
+            f"您好！看到贵司在招{title}，挺感兴趣的{desc_hint}。"
+            f"PS：正在和你聊的这个AI是我自己开发的，算是我的技术名片～",
             "low",
         )
 
@@ -154,22 +177,28 @@ def generate_reply(
             "enthusiastic": "语气热情积极",
         }.get(style, "语气正式专业")
 
+        system_content = (
+            SYSTEM_PROMPT.format(format_instructions=output_parser.get_format_instructions())
+            + f"\n\n本次回复风格: {style_hint}"
+        )
+
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT + f"\n\n本次回复风格: {style_hint}"},
-            {"role": "user", "content": context},
+            SystemMessage(content=system_content),
+            HumanMessage(content=context),
         ]
 
-        raw = llm_chat_deepseek(messages, temperature=0.7)
-        raw = raw.strip().strip('"').strip("'").strip()
+        llm = get_llm(temperature=0.7)
+        raw = llm.invoke(messages).content
 
-        reply = ""
-        interest = ""
+        # ── 使用 PydanticOutputParser 解析 ──
         try:
-            parsed = json.loads(raw)
-            reply = (parsed.get("reply") or parsed.get("content") or "").strip()
-            interest = (parsed.get("interest") or parsed.get("level") or "").strip().lower()
-        except json.JSONDecodeError:
-            import re
+            parsed = output_parser.parse(raw)
+            reply = parsed.reply.strip()
+            interest = parsed.interest.strip().lower()
+        except Exception:
+            # 解析失败 → 正则兜底
+            reply = ""
+            interest = ""
             m = re.search(r'"reply"\s*:\s*"([^"]*)"', raw)
             if m:
                 reply = m.group(1).strip()
@@ -189,6 +218,7 @@ def generate_reply(
         if len(reply) > 300:
             reply = reply[:300] + "..."
 
+        # ── 安全检查 ──
         refusal_patterns = [
             "无法提供", "无法回答", "不能回答", "无法帮助", "爱莫能助",
             "as an AI, I cannot", "I cannot provide",
@@ -207,6 +237,7 @@ def generate_reply(
 def generate_greeting(
     job_title: str, company: str, template: str = "", style: str = "professional"
 ) -> str:
+    """生成打招呼语，支持模板变量替换"""
     if not template:
         template = get_setting(
             "greeting_template",

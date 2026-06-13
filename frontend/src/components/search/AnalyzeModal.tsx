@@ -19,7 +19,7 @@ export function AnalyzeModal({ title, company, result, loading, onClose }: Analy
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center animate-fade-in" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center animate-fade-in" onClick={loading ? undefined : onClose}>
       <div
         className="bg-white rounded-2xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}

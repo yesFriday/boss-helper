@@ -377,6 +377,7 @@ class BossScraper:
         self.headless = headless
         self._pw = self._br = self._ctx = None
         self.page = None
+        self.search_cancelled = False  # 搜索取消标志
 
     def start(self):
         self._pw = sync_playwright().start()
@@ -576,6 +577,8 @@ class BossScraper:
 
         dom_jobs = self._extract_job_cards()
         if dom_jobs:
+            # 点击每个卡片提取 HR 活跃时间
+            dom_jobs = self._enrich_hr_active_time(dom_jobs)
             return dom_jobs
 
         lines = [l.strip() for l in self.page.inner_text("body").split("\n") if l.strip()]
@@ -753,15 +756,8 @@ class BossScraper:
                         || lines.find(x => x.includes('·') && x.length < 40) || '';
                     let experience = lines.find(x => /经验|应届|在校|不限/.test(x) && x.length < 30) || '';
                     let education = lines.find(x => /本科|硕士|博士|大专|学历不限|中专|高中/.test(x) && x.length < 30) || '';
-                    // HR 活跃时间
+                    // HR 活跃时间（不在卡片DOM里，后续通过点击卡片从右边详情面板获取）
                     let hrActiveTime = '';
-                    const onlineTag = card.querySelector('.boss-online-tag');
-                    if (onlineTag && onlineTag.textContent.trim() === '在线') {
-                        hrActiveTime = '在线';
-                    } else {
-                        const activeTimeEl = card.querySelector('.boss-active-time');
-                        hrActiveTime = activeTimeEl ? activeTimeEl.textContent.trim() : '';
-                    }
                     if (!company) {
                         company = lines.find(x =>
                             x !== title && x !== salary && x !== city &&
@@ -804,6 +800,90 @@ class BossScraper:
                     "hr_active_time": (row.get("hrActiveTime") or "").strip(),
                 }
             )
+        # 调试：打印 HR 活跃时间提取结果
+        hr_with_active = [j for j in jobs if j.get("hr_active_time")]
+        log.info(f"[搜索] 共 {len(jobs)} 条，有 HR 活跃时间: {len(hr_with_active)} 条")
+        if hr_with_active:
+            for j in hr_with_active[:3]:
+                log.info(f"[搜索]   {j['title']} → {j['hr_active_time']}")
+        return jobs
+
+    def _enrich_hr_active_time(self, jobs):
+        """点击每个职位卡片，从右边详情面板提取 HR 活跃时间。"""
+        try:
+            # 获取所有职位链接
+            links = self.page.query_selector_all('a[href*="/job_detail/"]')
+            if not links:
+                log.info("[搜索] 未找到职位链接，跳过 HR 活跃时间提取")
+                return jobs
+
+            log.info(f"[搜索] 开始提取 HR 活跃时间，共 {len(links)} 个链接")
+            # 创建 URL 到 job 的映射
+            url_to_job = {j.get("url", ""): j for j in jobs}
+            log.info(f"[搜索] job URL 样本: {list(url_to_job.keys())[:3]}")
+
+            skip_no_href = 0
+            skip_no_job = 0
+            skip_has_data = 0
+            clicked = 0
+
+            for i, link in enumerate(links):
+                if self.search_cancelled:
+                    log.info(f"[搜索] 用户取消搜索，停止提取 HR 活跃时间（已完成 {i}/{len(links)}）")
+                    break
+
+                try:
+                    href = link.get_attribute("href") or ""
+                    if not href:
+                        skip_no_href += 1
+                        continue
+
+                    # get_attribute("href") 返回相对路径，补全为完整 URL
+                    if href.startswith("/"):
+                        href = "https://www.zhipin.com" + href
+
+                    # 找到对应的 job
+                    job = url_to_job.get(href)
+                    if not job:
+                        skip_no_job += 1
+                        if i < 3:
+                            log.info(f"[搜索] 链接未匹配: {href}")
+                        continue
+
+                    # 如果已经有 HR 活跃时间，跳过
+                    if job.get("hr_active_time"):
+                        skip_has_data += 1
+                        continue
+
+                    # 点击卡片，等待右边详情面板渲染
+                    clicked += 1
+                    link.click()
+                    time.sleep(0.5)
+
+                    # 从页面级别提取 HR 活跃时间（右边详情面板）
+                    hr_active = self.page.evaluate("""() => {
+                        const onlineTag = document.querySelector('.boss-online-tag');
+                        if (onlineTag && onlineTag.textContent.trim() === '在线') {
+                            return '在线';
+                        }
+                        const activeTimeElement = document.querySelector('.boss-active-time');
+                        return activeTimeElement ? activeTimeElement.textContent.trim() : '';
+                    }""")
+
+                    if hr_active:
+                        job["hr_active_time"] = hr_active
+                        log.info(f"[搜索] HR活跃: {job['title']} → {hr_active}")
+
+                except Exception as e:
+                    log.debug(f"[搜索] 提取 HR 活跃时间失败: {e}")
+                    continue
+
+        except Exception as e:
+            log.warning(f"[搜索] _enrich_hr_active_time 异常: {e}")
+
+        # 统计结果
+        hr_with_active = [j for j in jobs if j.get("hr_active_time")]
+        log.info(f"[搜索] HR 活跃时间提取完成: 点击{clicked}次, 跳过[无href:{skip_no_href}, 未匹配:{skip_no_job}, 已有数据:{skip_has_data}], 有数据:{len(hr_with_active)}/{len(jobs)}")
         return jobs
 
     def _scroll_all(self, min_jobs=200):
@@ -812,8 +892,14 @@ class BossScraper:
             prev_count = 0
             no_new_rounds = 0
             while no_new_rounds < 3:
+                # 检查是否取消搜索
+                if self.search_cancelled:
+                    log.info("[搜索] 用户取消搜索，停止滚动")
+                    break
                 h = self.page.evaluate("document.body.scrollHeight")
                 for p in range(0, int(h) + 400, 400):
+                    if self.search_cancelled:
+                        break
                     self.page.evaluate("window.scrollTo(0,%d)" % p)
                     time.sleep(random.uniform(0.3, 0.6))
                 time.sleep(1)

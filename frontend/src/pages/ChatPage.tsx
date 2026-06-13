@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { MessageSquare, ExternalLink } from 'lucide-react'
 import { EmptyState } from '../components/common/EmptyState'
+import { Spinner } from '../components/common/Spinner'
 import { useChatStore } from '../stores/chatStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { conversationsApi } from '../api/conversations'
@@ -11,6 +12,8 @@ export function ChatPage() {
   const { conversations, activeConvId, messages } = useChatStore()
   const { addToast } = useNotificationStore()
   const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msgLoading, setMsgLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -22,29 +25,28 @@ export function ChatPage() {
   }, [messages])
 
   const loadConversations = async () => {
+    setLoading(true)
     try {
       const res = await conversationsApi.listConversations()
       useChatStore.getState().setConversations(res.conversations || [])
-    } catch {}
+    } catch {} finally { setLoading(false) }
   }
 
   const selectConversation = async (id: number) => {
     useChatStore.getState().setActiveConvId(id)
+    setMsgLoading(true)
     try {
       const res = await conversationsApi.getMessages(id)
       useChatStore.getState().setMessages(res.messages || [])
-      await conversationsApi.syncConversation(id)
-      const syncRes = await conversationsApi.getMessages(id)
-      useChatStore.getState().setMessages(syncRes.messages || [])
-    } catch {}
+    } catch {} finally { setMsgLoading(false) }
   }
 
   const handleSend = async () => {
     if (!activeConvId || !input.trim()) return
     const content = input.trim()
-    setInput('')
     try {
       await conversationsApi.sendMessage(activeConvId, content)
+      setInput('')
       const res = await conversationsApi.getMessages(activeConvId)
       useChatStore.getState().setMessages(res.messages || [])
       loadConversations()
@@ -84,7 +86,9 @@ export function ChatPage() {
 
       <div className="flex h-[70vh] bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="w-70 border-r border-slate-200 overflow-y-auto bg-slate-50">
-          {conversations.length > 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-8"><Spinner size="sm" /></div>
+          ) : conversations.length > 0 ? (
             conversations.map((conv) => (
               <div
                 key={conv.id}
@@ -133,19 +137,14 @@ export function ChatPage() {
                 >
                   {activeConv.auto_reply_enabled ? '暂停AI回复' : '开启AI回复'}
                 </button>
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim()}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  发送
-                </button>
               </div>
             )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3 bg-slate-50">
-            {messages.length > 0 ? (
+            {msgLoading ? (
+              <div className="flex items-center justify-center h-full"><Spinner size="md" /></div>
+            ) : messages.length > 0 ? (
               messages.map((msg) => (
                 <div
                   key={msg.id}
@@ -158,7 +157,7 @@ export function ChatPage() {
                         : 'self-end bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
                   )}
                 >
-                  <div className={cn('text-xs font-semibold mb-1.5 uppercase tracking-wider', msg.sender === 'hr' ? 'text-slate-400' : 'text-white/80')}>
+                  <div className={cn('text-xs font-semibold mb-1.5', msg.sender === 'hr' ? 'text-slate-400 uppercase tracking-wider' : 'text-white/80')}>
                     {msg.sender === 'hr' ? 'HR' : msg.ai_generated ? '我 (AI代发)' : '我'}
                   </div>
                   <div className="text-sm leading-relaxed">{msg.content}</div>
@@ -189,6 +188,13 @@ export function ChatPage() {
                 rows={1}
                 className="flex-1 px-4 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all resize-none"
               />
+              <button
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-sm hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-shrink-0"
+              >
+                发送
+              </button>
             </div>
           </div>
         </div>

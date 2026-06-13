@@ -32,6 +32,17 @@ export const STATUS_BADGE_CLASS: Record<string, string> = {
   missing_url: 'bg-orange-100 text-orange-800',
 }
 
+export const HR_ACTIVE_BADGE_CLASS: Record<string, string> = {
+  在线: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  '刚刚活跃': 'bg-teal-100 text-teal-800 border-teal-300',
+  '今日活跃': 'bg-sky-100 text-sky-800 border-sky-300',
+  '3日内活跃': 'bg-blue-100 text-blue-800 border-blue-300',
+  '本周活跃': 'bg-indigo-100 text-indigo-800 border-indigo-300',
+  '本月活跃': 'bg-violet-100 text-violet-800 border-violet-300',
+  '半年前活跃': 'bg-gray-100 text-gray-500 border-gray-200',
+  '一年前活跃': 'bg-gray-100 text-gray-400 border-gray-200',
+}
+
 export const AI_PLATFORMS: Record<string, { baseUrl: string; models: { v: string; t: string }[] }> = {
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',

@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import { Star, Send } from 'lucide-react'
+import { Spinner } from '../components/common/Spinner'
 import { useJobsStore } from '../stores/jobsStore'
 import { useSystemStore } from '../stores/systemStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { jobsApi } from '../api/jobs'
 import { shortlistsApi } from '../api/shortlists'
 import { systemApi } from '../api/system'
-import { STATUS_MAP, STATUS_BADGE_CLASS } from '../lib/constants'
+import { STATUS_MAP, STATUS_BADGE_CLASS, HR_ACTIVE_BADGE_CLASS } from '../lib/constants'
 import { cn } from '../lib/cn'
 
 const PAGE_SIZE = 15
@@ -14,20 +16,25 @@ const PAGE_SIZE = 15
 export function ApplicationsPage() {
   const { appJobs, appCurrentPage, batchProgress } = useJobsStore()
   const { todayApplications } = useSystemStore()
+  const { settings } = useSettingsStore()
   const { addToast } = useNotificationStore()
   const [filter, setFilter] = useState('')
   const [showShortlist, setShowShortlist] = useState(false)
   const [shortlists, setShortlists] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const dailyLimit = parseInt(settings.daily_apply_limit || '15', 10)
 
   useEffect(() => {
     loadApplications()
   }, [filter])
 
   const loadApplications = async () => {
+    setLoading(true)
     try {
       const res = await jobsApi.listJobs({ limit: 500, status: filter || undefined })
       useJobsStore.getState().setAppJobs(res.jobs || [])
-    } catch {}
+    } catch {} finally { setLoading(false) }
     const stats = await systemApi.getStats()
     useJobsStore.getState().setFunnel({
       pending: stats.pending || 0,
@@ -101,7 +108,7 @@ export function ApplicationsPage() {
           { label: '今日投递', value: todayApplications, color: 'from-indigo-400 to-purple-400' },
           { label: '待投递', value: pending, color: 'from-amber-400 to-orange-400' },
           { label: 'HR已回复', value: replied, color: 'from-emerald-400 to-teal-400' },
-          { label: '每日上限', value: 15, color: 'from-pink-400 to-rose-400' },
+          { label: '每日上限', value: dailyLimit, color: 'from-pink-400 to-rose-400' },
         ].map((item) => (
           <div key={item.label} className="bg-white rounded-xl p-5 text-center shadow-sm border border-slate-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
             <div className={cn('text-3xl font-extrabold bg-gradient-to-r bg-clip-text text-transparent', item.color)}>
@@ -173,6 +180,7 @@ export function ApplicationsPage() {
                 <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">公司</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">薪资</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">城市</th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">HR活跃</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">状态</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">操作</th>
               </tr>
@@ -190,6 +198,15 @@ export function ApplicationsPage() {
                       <td className="py-3 px-4 text-slate-600">{s.company}</td>
                       <td className="py-3 px-4 text-red-500 font-semibold">{s.salary}</td>
                       <td className="py-3 px-4 text-slate-600">{s.city}</td>
+                      <td className="py-3 px-4">
+                        {s.hr_active_time ? (
+                          <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold border', HR_ACTIVE_BADGE_CLASS[s.hr_active_time] || 'bg-gray-100 text-gray-500 border-gray-200')}>
+                            {s.hr_active_time}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-300">-</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4"><span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">收藏</span></td>
                       <td className="py-3 px-4">
                         <div className="flex gap-2">
@@ -200,7 +217,7 @@ export function ApplicationsPage() {
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan={6} className="py-8 text-center text-slate-400">暂无收藏</td></tr>
+                  <tr><td colSpan={7} className="py-8 text-center text-slate-400">暂无收藏</td></tr>
                 )
               ) : pageJobs.length > 0 ? (
                 pageJobs.map((job) => (
@@ -213,6 +230,15 @@ export function ApplicationsPage() {
                     <td className="py-3 px-4 text-slate-600">{job.company}</td>
                     <td className="py-3 px-4 text-red-500 font-semibold">{job.salary}</td>
                     <td className="py-3 px-4 text-slate-600">{job.city}</td>
+                    <td className="py-3 px-4">
+                      {job.hr_active_time ? (
+                        <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold border', HR_ACTIVE_BADGE_CLASS[job.hr_active_time] || 'bg-gray-100 text-gray-500 border-gray-200')}>
+                          {job.hr_active_time}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-300">-</span>
+                      )}
+                    </td>
                     <td className="py-3 px-4">
                       <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold', STATUS_BADGE_CLASS[job.status || 'pending'])}>
                         {STATUS_MAP[job.status || 'pending']}
@@ -227,8 +253,10 @@ export function ApplicationsPage() {
                     </td>
                   </tr>
                 ))
+              ) : loading ? (
+                <tr><td colSpan={7} className="py-8 text-center"><Spinner size="md" /></td></tr>
               ) : (
-                <tr><td colSpan={6} className="py-8 text-center text-slate-400">暂无记录</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-slate-400">暂无记录</td></tr>
               )}
             </tbody>
           </table>
