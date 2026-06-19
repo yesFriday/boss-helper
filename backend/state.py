@@ -35,7 +35,7 @@ def init_db():
             company TEXT,                                   -- 公司名称
             salary TEXT,                                    -- 薪资范围，如"15-25K"
             job_url TEXT UNIQUE NOT NULL,                   -- 岗位详情页URL（唯一）
-            city TEXT,                                      -- 城市，如"淄博"
+            city TEXT,                                      -- 城市，如"广州"
             experience TEXT,                                -- 经验要求，如"3-5年"
             education TEXT,                                 -- 学历要求，如"本科"
             hr_name TEXT,                                   -- HR姓名
@@ -171,8 +171,8 @@ def init_db():
         "auto_reply_enabled": "true",
         "min_reply_delay_sec": "15",
         "max_reply_delay_sec": "20",
-        "batch_delay_min_sec": "30",
-        "batch_delay_max_sec": "90",
+        "batch_delay_min_sec": "3",
+        "batch_delay_max_sec": "8",
         "resume_summary": "",
         "wechat_id": "",
         "search_keywords": "AI Agent,大模型开发,AI产品经理,RAG开发,大模型应用",
@@ -180,12 +180,14 @@ def init_db():
             "enabled": False,
             "days": [],
             "time_ranges": [],
-            "auto_apply": {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"},
+            "auto_apply": {"keyword": "AI Agent", "city": "广州", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"},
             "auto_reply": {"style": "professional"},
         }),
     }
     for k, v in defaults.items():
         db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+    db.execute("UPDATE settings SET value='3' WHERE key='batch_delay_min_sec' AND value='30'")
+    db.execute("UPDATE settings SET value='8' WHERE key='batch_delay_max_sec' AND value='90'")
     db.commit()
 
 

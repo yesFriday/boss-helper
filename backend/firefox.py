@@ -565,7 +565,7 @@ class BossScraper:
 
     # ── 搜索列表页 ──
 
-    def search(self, keyword, city_code="100010000"):
+    def search(self, keyword, city_code="101280100"):
         """搜索关键词，返回岗位列表"""
         url = "https://www.zhipin.com/web/geek/job?query=%s&city=%s" % (
             quote_plus(keyword),

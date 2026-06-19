@@ -258,7 +258,7 @@ def _clean_messages_for_web(messages: List[dict]) -> List[dict]:
 
 class SearchRequest(BaseModel):
     keyword: str = "AI Agent"
-    city: str = "淄博"
+    city: str = "广州"
     welfare: Optional[str] = None  # 福利筛选 如 "双休,五险一金"
     salary_expect: Optional[int] = None  # 期望薪资(K)，闭区间判断
     experience_expect: Optional[int] = None  # 工作年限(年)，闭区间判断
@@ -654,7 +654,7 @@ async def search_jobs(req: SearchRequest):
     was_paused = monitor_paused
     monitor_paused = True
     try:
-        city_code = CITY_MAP.get(req.city, "100010000")
+        city_code = CITY_MAP.get(req.city, "101280100")
         try:
             jobs = await _run_pw(automation.search, req.keyword, city_code)
         except Exception as e:
@@ -1130,7 +1130,7 @@ def get_scheduler_config():
         config = {}
     config.setdefault("days", [])
     config.setdefault("time_ranges", [])
-    config.setdefault("auto_apply", {"keyword": "AI Agent", "city": "淄博", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"})
+    config.setdefault("auto_apply", {"keyword": "AI Agent", "city": "广州", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"})
     config.setdefault("auto_reply", {"style": "professional"})
     config["enabled"] = scheduler_enabled
     return {"config": config}
@@ -1212,8 +1212,8 @@ async def scheduler_loop():
             # ── 搜索+投递 ──
             auto_cfg = config.get("auto_apply", {})
             keyword = auto_cfg.get("keyword", "AI Agent")
-            city = auto_cfg.get("city", "淄博")
-            city_code = CITY_MAP.get(city, "100010000")
+            city = auto_cfg.get("city", "广州")
+            city_code = CITY_MAP.get(city, "101280100")
             daily_limit = auto_cfg.get("daily_limit", 30)
             hr_active_filter = auto_cfg.get("hr_active_filter", "all")
 
@@ -1229,7 +1229,7 @@ async def scheduler_loop():
                     entry = _add_scheduler_log(["页面异常(验证码/登录失效)，已停止定时任务"])
                     await broadcast_ws({"type": "scheduler_tick", "log": entry})
                     await broadcast_ws({"type": "safety_warning", "message": "检测到页面异常，定时任务已自动停止"})
-                    break
+                    continue
 
                 # 搜索：数据库没有待投岗位才搜索
                 pending = get_pending_applications_by_activity(1, hr_active_filter)
