@@ -19,8 +19,8 @@ pip3 install -r requirements.txt
 
 # 装 Playwright 浏览器
 echo ""
-echo ">> 装 Playwright 浏览器（Chromium + Firefox）..."
-python3 -m playwright install chromium firefox 2>&1 | tail -5
+echo ">> 装 Playwright 浏览器（Firefox）..."
+python3 -m playwright install firefox 2>&1 | tail -5
 
 echo ""
 echo "================================"

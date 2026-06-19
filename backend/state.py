@@ -139,9 +139,32 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    # 面试安排表
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS interviews (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT,
+            company         TEXT    NOT NULL,
+            job_title       TEXT    NOT NULL,
+            interview_type  TEXT    NOT NULL DEFAULT 'online',
+            interview_date  TEXT    NOT NULL,
+            start_time      TEXT    NOT NULL,
+            end_time        TEXT    NOT NULL,
+            duration_min    INTEGER NOT NULL DEFAULT 60,
+            location        TEXT,
+            lat             REAL,
+            lng             REAL,
+            contact_name    TEXT,
+            contact_phone   TEXT,
+            status          TEXT    NOT NULL DEFAULT 'pending',
+            notes           TEXT,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
     # 默认设置
     defaults = {
-        "greeting_template": "您好！看到贵司在招{job_title}，很感兴趣。PS：正在和你聊天的这个AI工具是我自己开发的——就当是我的技术名片了",
+        "greeting_template": "你好，贵司{job_title}还在招人吗？想发份简历给您看下，方便吗？",
         "greeting_enabled": "true",
         "ai_reply_style": "professional",
         "daily_apply_limit": "15",
@@ -559,9 +582,80 @@ def get_recent_messages(conversation_id: int, limit: int = 5) -> List[dict]:
     )
 
 
+def get_all_messages(conversation_id: int) -> List[dict]:
+    """获取该会话的所有消息记录，按时间正序排列。"""
+    return _rows_to_list(
+        get_db()
+        .execute(
+            "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at ASC, id ASC",
+            (conversation_id,),
+        )
+        .fetchall()
+    )
+
+
 def replace_conversation_messages(conversation_id: int, messages: List[dict]):
-    """用 BOSS 当前消息历史覆盖本地缓存，避免 Web 端展示过期或错会话内容。"""
+    """增量同步：用 BOSS 当前可见消息历史对齐并增量更新本地缓存，保留完整历史消息。"""
     db = get_db()
+    
+    # 1. 获取数据库中已有的该会话所有消息记录，按时间正序
+    db_msgs = _rows_to_list(db.execute(
+        "SELECT id, sender, content, delivery_status, ai_generated FROM messages WHERE conversation_id=? ORDER BY id ASC",
+        (conversation_id,)
+    ).fetchall())
+    
+    if not messages:
+        return
+        
+    # 2. 构建网页读取的消息对象列表，清除内容首尾空白
+    clean_web_msgs = []
+    for msg in messages:
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        clean_web_msgs.append({
+            "sender": msg.get("sender", "hr"),
+            "content": content,
+            "status": (msg.get("status") or msg.get("delivery_status") or "").strip()
+        })
+        
+    if not clean_web_msgs:
+        return
+
+    # 3. 寻找最大重叠区（滑动窗口比对）
+    k = len(db_msgs)
+    m = len(clean_web_msgs)
+    overlap_len = 0
+    
+    for l in range(min(k, m), 0, -1):
+        match = True
+        for idx in range(l):
+            db_item = db_msgs[k - l + idx]
+            web_item = clean_web_msgs[idx]
+            if db_item["sender"] != web_item["sender"] or db_item["content"] != web_item["content"]:
+                match = False
+                break
+        if match:
+            overlap_len = l
+            break
+
+    # 4. 更新重叠区的消息状态，并确定需要新插入的消息
+    if overlap_len > 0:
+        for idx in range(overlap_len):
+            db_item = db_msgs[k - overlap_len + idx]
+            web_item = clean_web_msgs[idx]
+            new_status = web_item["status"]
+            if new_status and db_item["delivery_status"] != new_status:
+                db.execute(
+                    "UPDATE messages SET delivery_status=? WHERE id=?",
+                    (new_status, db_item["id"])
+                )
+        new_msgs_to_insert = clean_web_msgs[overlap_len:]
+    else:
+        # 无重叠区（例如库为空，或历史记录有断档，直接追加/写入）
+        new_msgs_to_insert = clean_web_msgs
+
+    # 5. 获取已有的 AI 生成回复内容，做标记保留（对新插入的进行识别）
     old_ai = {
         r["content"]
         for r in db.execute(
@@ -569,18 +663,25 @@ def replace_conversation_messages(conversation_id: int, messages: List[dict]):
             (conversation_id,),
         ).fetchall()
     }
-    db.execute("DELETE FROM messages WHERE conversation_id=?", (conversation_id,))
-    for msg in messages:
-        sender = msg.get("sender", "hr")
-        content = (msg.get("content") or "").strip()
-        delivery_status = (msg.get("status") or msg.get("delivery_status") or "").strip()
-        if not content:
-            continue
+
+    # 6. 插入新消息
+    for msg in new_msgs_to_insert:
+        sender = msg["sender"]
+        content = msg["content"]
+        status = msg["status"]
         ai_generated = 1 if sender == "me" and content in old_ai else 0
         db.execute(
             "INSERT INTO messages (conversation_id, sender, content, delivery_status, ai_generated) VALUES (?, ?, ?, ?, ?)",
-            (conversation_id, sender, content, delivery_status, ai_generated),
+            (conversation_id, sender, content, status, ai_generated),
         )
+
+    # 7. 反向已读推导逻辑：如果同步时最新的一条消息是 HR 发送的，直接将我方所有历史消息标记为“已读”
+    if clean_web_msgs[-1]["sender"] == "hr":
+        db.execute(
+            "UPDATE messages SET delivery_status='已读' WHERE conversation_id=? AND sender='me' AND delivery_status != '已读'",
+            (conversation_id,)
+        )
+
     db.commit()
 
 
@@ -701,6 +802,207 @@ def list_shortlists(limit: int = 100) -> list:
 def is_in_shortlist(job_url: str) -> bool:
     row = get_db().execute("SELECT COUNT(*) as cnt FROM shortlists WHERE job_url=?", (job_url,)).fetchone()
     return row["cnt"] > 0 if row else False
+
+
+# ═══════════════════════
+#  面试安排
+# ═══════════════════════
+
+def add_interview(
+    company: str,
+    job_title: str,
+    interview_type: str,
+    interview_date: str,
+    start_time: str,
+    end_time: str,
+    duration_min: int = 60,
+    conversation_id: str = "",
+    location: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    contact_name: str = "",
+    contact_phone: str = "",
+    notes: str = "",
+) -> int:
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO interviews
+           (conversation_id, company, job_title, interview_type, interview_date,
+            start_time, end_time, duration_min, location, lat, lng,
+            contact_name, contact_phone, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (conversation_id, company, job_title, interview_type, interview_date,
+         start_time, end_time, duration_min, location, lat, lng,
+         contact_name, contact_phone, notes),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def get_interview(interview_id: int) -> Optional[dict]:
+    return _row_to_dict(get_db().execute("SELECT * FROM interviews WHERE id=?", (interview_id,)).fetchone())
+
+
+def list_interviews_by_date(date_str: str) -> List[dict]:
+    """查询某天的所有面试（pending + confirmed）"""
+    return _rows_to_list(
+        get_db().execute(
+            """SELECT * FROM interviews
+               WHERE interview_date=? AND status IN ('pending','confirmed')
+               ORDER BY start_time""",
+            (date_str,),
+        ).fetchall()
+    )
+
+
+def get_all_upcoming_interviews() -> List[dict]:
+    """查询所有未来的面试"""
+    return _rows_to_list(
+        get_db().execute(
+            """SELECT * FROM interviews
+               WHERE interview_date >= date('now','localtime')
+                 AND status IN ('pending','confirmed')
+               ORDER BY interview_date, start_time"""
+        ).fetchall()
+    )
+
+
+def get_interviews_by_conversation(conversation_id: str) -> List[dict]:
+    """查询某个会话关联的所有面试"""
+    return _rows_to_list(
+        get_db().execute(
+            "SELECT * FROM interviews WHERE conversation_id=? ORDER BY created_at DESC",
+            (conversation_id,),
+        ).fetchall()
+    )
+
+
+def update_interview_status(interview_id: int, status: str):
+    get_db().execute(
+        "UPDATE interviews SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (status, interview_id),
+    )
+    get_db().commit()
+
+
+def update_interview(
+    interview_id: int,
+    interview_date: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    location: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    contact_name: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    notes: Optional[str] = None,
+):
+    """部分更新面试信息，传 None 的字段不更新"""
+    db = get_db()
+    fields = []
+    values = []
+    for name, val in [
+        ("interview_date", interview_date),
+        ("start_time", start_time),
+        ("end_time", end_time),
+        ("location", location),
+        ("lat", lat),
+        ("lng", lng),
+        ("contact_name", contact_name),
+        ("contact_phone", contact_phone),
+        ("notes", notes),
+    ]:
+        if val is not None:
+            fields.append(f"{name}=?")
+            values.append(val)
+    if not fields:
+        return
+    fields.append("updated_at=CURRENT_TIMESTAMP")
+    values.append(interview_id)
+    db.execute(f"UPDATE interviews SET {', '.join(fields)} WHERE id=?", values)
+    db.commit()
+
+
+def find_available_slots(
+    interview_date: str,
+    interview_type: str,
+    duration_min: int = 60,
+) -> List[dict]:
+    """
+    查询某天可用的面试时段。
+    线下：返回上午/下午是否可用（bool），不考虑具体交通时间。
+    线上：返回当天所有空隙，间隔至少1小时。
+    返回可用时段的列表，每个元素包含 {start_time, end_time, period}。
+    """
+    existing = list_interviews_by_date(interview_date)
+
+    if interview_type == "offline":
+        # 线下规则：上午一场（9:00-12:00），下午一场（14:00-18:00）
+        slots = []
+        am_occupied = any(_time_overlap(e, ("09:00", "12:00")) for e in existing)
+        pm_occupied = any(_time_overlap(e, ("14:00", "18:00")) for e in existing)
+        if not am_occupied:
+            slots.append({"start_time": "09:00", "end_time": "12:00", "period": "上午"})
+        if not pm_occupied:
+            slots.append({"start_time": "14:00", "end_time": "18:00", "period": "下午"})
+        return slots
+
+    else:
+        # 线上规则：找到所有已占用时段，找出中间 ≥ duration_min 且与前后间隔 ≥ 60min 的空隙
+        slots = []
+        day_start = "08:00"
+        day_end = "20:00"
+
+        occupied = [(e["start_time"], e["end_time"]) for e in existing]
+        occupied.sort()
+
+        prev_end = day_start
+        for s, e in occupied:
+            gap = _time_diff_min(prev_end, s)
+            if gap >= duration_min + 60:  # 面试时长 + 1小时间隔
+                slot_start = prev_end
+                slot_end = _add_minutes(slot_start, duration_min)
+                if _time_cmp(slot_end, s) < 0:
+                    slots.append({"start_time": slot_start, "end_time": slot_end, "period": ""})
+            prev_end = max(prev_end, e)
+
+        # 最后一个占用后的空隙
+        gap = _time_diff_min(prev_end, day_end)
+        if gap >= duration_min:
+            slot_start = prev_end
+            slot_end = _add_minutes(slot_start, duration_min)
+            if _time_cmp(slot_end, day_end) <= 0:
+                slots.append({"start_time": slot_start, "end_time": slot_end, "period": ""})
+
+        return slots
+
+
+# 内部时间工具函数
+def _time_to_min(t: str) -> int:
+    parts = t.split(":")
+    return int(parts[0]) * 60 + int(parts[1])
+
+
+def _time_diff_min(t1: str, t2: str) -> int:
+    return _time_to_min(t2) - _time_to_min(t1)
+
+
+def _add_minutes(t: str, minutes: int) -> str:
+    total = _time_to_min(t) + minutes
+    h, m = divmod(total % 1440, 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def _time_cmp(t1: str, t2: str) -> int:
+    return _time_to_min(t1) - _time_to_min(t2)
+
+
+def _time_overlap(row: dict, block: tuple) -> bool:
+    """判断一个面试的时间是否与某个时间段重叠"""
+    rs = row["start_time"]
+    re = row["end_time"]
+    bs, be = block
+    return not (_time_cmp(re, bs) <= 0 or _time_cmp(rs, be) >= 0)
 
 
 # 启动时初始化

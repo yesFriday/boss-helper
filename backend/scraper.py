@@ -130,9 +130,9 @@ def scrape_zhaopin(keyword="AI应用开发", max_jobs=50):
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
+            browser = p.firefox.launch(headless=True)
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
                 viewport={"width": 1920, "height": 1080},
                 locale="zh-CN",
             )

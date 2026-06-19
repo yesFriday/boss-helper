@@ -22,7 +22,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "backend" / "interview"))
 from llm_client import get_llm
 
-from backend.state import get_recent_messages, get_setting
+from backend.state import get_all_messages, get_setting
 from backend.logger import get_logger
 
 log = get_logger("replier")
@@ -122,13 +122,13 @@ def build_reply_context(
     else:
         parts.append("求职者微信: 未设置")
 
-    msgs = get_recent_messages(conversation_id, 5)
+    msgs = get_all_messages(conversation_id)
     if msgs:
         parts.append("\n最近的对话记录:")
-        for m in reversed(msgs):
+        for m in msgs:
             sender_label = "HR" if m["sender"] == "hr" else "我"
             ai_tag = " [AI代发]" if m.get("ai_generated") else ""
-            parts.append(f"  {sender_label}{ai_tag}: {m['content'][:200]}")
+            parts.append(f"  {sender_label}{ai_tag}: {m['content']}")
 
     parts.append(f"\nHR刚刚说: {hr_message}")
 

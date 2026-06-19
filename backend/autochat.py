@@ -288,20 +288,24 @@ class BossAutomation(BossScraper):
     #  自动投递
     # ══════════════════════════════════════
 
-    def apply_to_job(self, job_url: str, greeting: Optional[str] = None) -> dict:
+    def apply_to_job(self, job_url: str, greeting: Optional[str] = None, max_apply_limit: int = 0) -> dict:
         """
         对单个岗位执行投递流程:
         1. 打开详情页
         2. 点击"立即沟通"
         3. 发送招呼语
+        max_apply_limit: 外部传入的每日上限（如调度器自己的配置），0 表示用全局设置
         返回 {success, message, application_id}
         """
         if not job_url:
             return {"success": False, "message": "缺少岗位链接"}
 
-        # 日限检查
+        # 日限检查：外部传入的上限优先，否则用全局设置
         today_count = get_today_application_count()
-        daily_limit = int(get_setting("daily_apply_limit", "15"))
+        if max_apply_limit > 0:
+            daily_limit = max_apply_limit
+        else:
+            daily_limit = int(get_setting("daily_apply_limit", "15"))
         if today_count >= min(daily_limit, MAX_APPLY_PER_DAY):
             return {"success": False, "message": f"已达今日上限({today_count}条)"}
 
@@ -424,7 +428,7 @@ class BossAutomation(BossScraper):
             log.error(f"投递失败: {e}", exc_info=True)
             return {"success": False, "message": str(e)}
 
-    def apply_batch(self, job_urls: List[str], greeting_template: Optional[str] = None) -> List[dict]:
+    def apply_batch(self, job_urls: List[str], greeting_template: Optional[str] = None, max_apply_limit: int = 0) -> List[dict]:
         """批量投递，带间隔延迟。可通过设置 batch_delay_sec 控制间隔。"""
         results = []
         min_delay = int(get_setting("batch_delay_min_sec", "30"))
@@ -435,7 +439,7 @@ class BossAutomation(BossScraper):
                 log.info(f"[WAIT] 等待 {delay:.0f}s 后投递下一条...")
                 time.sleep(delay)
 
-            result = self.apply_to_job(url, greeting_template)
+            result = self.apply_to_job(url, greeting_template, max_apply_limit=max_apply_limit)
             results.append(result)
 
             if not result["success"] and "上限" in result.get("message", ""):

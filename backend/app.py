@@ -1223,6 +1223,14 @@ async def scheduler_loop():
             monitor_paused = True
 
             try:
+                # 搜索前安全检查
+                if not await _run_pw(automation.check_page_safety):
+                    scheduler_enabled = False
+                    entry = _add_scheduler_log(["页面异常(验证码/登录失效)，已停止定时任务"])
+                    await broadcast_ws({"type": "scheduler_tick", "log": entry})
+                    await broadcast_ws({"type": "safety_warning", "message": "检测到页面异常，定时任务已自动停止"})
+                    break
+
                 # 搜索：数据库没有待投岗位才搜索
                 pending = get_pending_applications_by_activity(1, hr_active_filter)
                 if not pending:
@@ -1244,6 +1252,14 @@ async def scheduler_loop():
                     if applied >= daily_limit:
                         entry = _add_scheduler_log([f"今日已投递{applied}条，达到上限"])
                         await broadcast_ws({"type": "scheduler_tick", "log": entry})
+                        break
+
+                    # 每轮投递前安全检查
+                    if not await _run_pw(automation.check_page_safety):
+                        scheduler_enabled = False
+                        entry = _add_scheduler_log(["页面异常(验证码/登录失效)，已停止定时任务"])
+                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
+                        await broadcast_ws({"type": "safety_warning", "message": "检测到页面异常，定时任务已自动停止"})
                         break
 
                     remaining = daily_limit - applied
@@ -1268,7 +1284,7 @@ async def scheduler_loop():
                     # 执行投递
                     urls = [p["job_url"] for p in pending if p.get("job_url")]
                     try:
-                        results = await _run_pw(automation.apply_batch, urls[:remaining])
+                        results = await _run_pw(automation.apply_batch, urls[:remaining], None, daily_limit)
                         ok = sum(1 for r in results if r.get("success"))
                         entry = _add_scheduler_log([f"投递{len(results)}条，成功{ok}条"])
                         await broadcast_ws({"type": "scheduler_tick", "log": entry})
@@ -1282,7 +1298,7 @@ async def scheduler_loop():
                     if not scheduler_enabled:
                         break
 
-                _scheduler_phase = "idle" if scheduler_enabled else "idle"
+                _scheduler_phase = "idle"
 
             finally:
                 monitor_paused = was_paused
