@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, RefreshCw, Heart } from 'lucide-react'
+import { Save, RefreshCw, Heart, Plus, Trash2 } from 'lucide-react'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useSystemStore } from '../stores/systemStore'
 import { useNotificationStore } from '../stores/notificationStore'
@@ -7,10 +7,17 @@ import { settingsApi } from '../api/settings'
 import { systemApi } from '../api/system'
 import { AI_PLATFORMS } from '../lib/constants'
 
+interface TimeSlot {
+  label: string
+  start: string
+  end: string
+}
+
 export function SettingsPage() {
   const { aiKeyConfigured } = useSettingsStore()
   const { sessionStatus } = useSystemStore()
   const { addToast } = useNotificationStore()
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
   const [formData, setFormData] = useState({
     greeting_template: '',
     ai_reply_style: 'professional',
@@ -27,6 +34,9 @@ export function SettingsPage() {
     ai_api_key: '',
     ai_base_url: '',
     ai_model: '',
+    interview_format: 'both',
+    interview_time_slots: '',
+    interview_daily_limit: '3',
   })
 
   useEffect(() => {
@@ -37,6 +47,32 @@ export function SettingsPage() {
     try {
       const res = await settingsApi.getSettings()
       const s = res.settings || {}
+      
+      // Parse time slots
+      let parsedSlots: TimeSlot[] = []
+      try {
+        if (s.interview_time_slots) {
+          const parsed = JSON.parse(s.interview_time_slots)
+          if (Array.isArray(parsed)) {
+            parsedSlots = parsed.map((item: any) => ({
+              label: item.label || '',
+              start: item.start || '',
+              end: item.end || '',
+            }))
+          } else {
+            throw new Error()
+          }
+        } else {
+          throw new Error()
+        }
+      } catch {
+        parsedSlots = [
+          { label: '上午', start: '09:00', end: '12:00' },
+          { label: '下午', start: '14:00', end: '18:00' },
+        ]
+      }
+      setTimeSlots(parsedSlots)
+
       setFormData({
         greeting_template: s.greeting_template || '',
         ai_reply_style: s.ai_reply_style || 'professional',
@@ -53,6 +89,9 @@ export function SettingsPage() {
         ai_api_key: '',
         ai_base_url: s.ai_base_url || '',
         ai_model: s.ai_model || '',
+        interview_format: s.interview_format || 'both',
+        interview_time_slots: s.interview_time_slots || '',
+        interview_daily_limit: s.interview_daily_limit || '3',
       })
       useSettingsStore.getState().setAiKeyConfigured(s.ai_key_configured === 'true')
     } catch {}
@@ -74,6 +113,9 @@ export function SettingsPage() {
         auto_reply_enabled: formData.auto_reply_enabled,
         ai_base_url: formData.ai_base_url,
         ai_model: formData.ai_model,
+        interview_format: formData.interview_format,
+        interview_time_slots: JSON.stringify(timeSlots),
+        interview_daily_limit: formData.interview_daily_limit,
         ...(formData.ai_api_key ? { ai_api_key: formData.ai_api_key } : {}),
       })
       addToast('设置已保存', 'success')
@@ -229,6 +271,96 @@ export function SettingsPage() {
               onChange={(e) => setFormData((prev) => ({ ...prev, resume_summary: e.target.value }))}
               placeholder="技能、项目经验..."
               className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all min-h-[60px] resize-y"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4">面试自动排程设置</h3>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">接受面试形式</label>
+            <select
+              value={formData.interview_format}
+              onChange={(e) => setFormData((prev) => ({ ...prev, interview_format: e.target.value }))}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="both">线上线下均可</option>
+              <option value="online">仅接受线上面试</option>
+              <option value="offline">仅接受线下面试</option>
+            </select>
+          </div>
+          <div className="flex items-start gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0 pt-2">面试期望时段</label>
+            <div className="flex-1 space-y-3">
+              {timeSlots.map((slot, index) => (
+                <div key={index} className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={slot.label}
+                    placeholder="时段名称 (如: 上午)"
+                    onChange={(e) => {
+                      const newSlots = [...timeSlots]
+                      newSlots[index].label = e.target.value
+                      setTimeSlots(newSlots)
+                    }}
+                    className="w-40 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                  />
+                  <input
+                    type="time"
+                    value={slot.start}
+                    onChange={(e) => {
+                      const newSlots = [...timeSlots]
+                      newSlots[index].start = e.target.value
+                      setTimeSlots(newSlots)
+                    }}
+                    className="w-32 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
+                  />
+                  <span className="text-slate-400 font-semibold">—</span>
+                  <input
+                    type="time"
+                    value={slot.end}
+                    onChange={(e) => {
+                      const newSlots = [...timeSlots]
+                      newSlots[index].end = e.target.value
+                      setTimeSlots(newSlots)
+                    }}
+                    className="w-32 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTimeSlots(timeSlots.filter((_, i) => i !== index))
+                    }}
+                    className="p-2.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors cursor-pointer"
+                    title="删除此时间段"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setTimeSlots([...timeSlots, { label: '', start: '09:00', end: '18:00' }])
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors cursor-pointer mt-1"
+              >
+                <Plus size={16} />
+                添加时间段
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">每日面试上限</label>
+            <input
+              type="number"
+              value={formData.interview_daily_limit}
+              onChange={(e) => setFormData((prev) => ({ ...prev, interview_daily_limit: e.target.value }))}
+              min={1}
+              max={10}
+              className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
             />
           </div>
         </div>

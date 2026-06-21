@@ -304,6 +304,9 @@ class SettingsUpdate(BaseModel):
     ai_api_key: Optional[str] = None  # AI API Key
     ai_base_url: Optional[str] = None  # AI Base URL
     ai_model: Optional[str] = None  # AI 模型名称
+    interview_format: Optional[str] = None  # 面试形式限制 (online/offline/both)
+    interview_time_slots: Optional[str] = None  # 面试时间段配置 (JSON格式)
+    interview_daily_limit: Optional[str] = None  # 每日面试上限数
 
 
 # ══════════════════════════════════════
@@ -825,13 +828,14 @@ async def analyze_jd(req: AnalyzeRequest):
 
     try:
         sys.path.insert(0, str(project_root / "interview"))
-        from llm_client import llm_chat_deepseek
+        from llm_client import get_llm
+        from langchain_core.messages import SystemMessage, HumanMessage
 
-        raw = llm_chat_deepseek(
-            [{"role": "user", "content": prompt}],
-            system_prompt="你是求职辅导专家，输出严格JSON。",
-            temperature=0.3,
-        )
+        llm = get_llm(temperature=0.3)
+        raw = llm.invoke([
+            SystemMessage(content="你是求职辅导专家，输出严格JSON。"),
+            HumanMessage(content=prompt)
+        ]).content
         import json
 
         return json.loads(raw.strip().strip("`").strip("json").strip())
@@ -873,6 +877,21 @@ def add_shortlist(req: dict = {}):
 def remove_shortlist(sid: int):
     remove_from_shortlist(sid)
     return {"status": "ok"}
+
+
+@app.get("/api/interviews")
+def get_interviews():
+    from backend.state import get_all_interviews
+    return {"interviews": get_all_interviews()}
+
+
+@app.delete("/api/interviews/{iid}")
+def remove_interview(iid: int):
+    from backend.state import delete_interview
+    success = delete_interview(iid)
+    if success:
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="面试记录不存在")
 
 
 # ══════════════════════════════════════
@@ -1167,7 +1186,7 @@ def get_scheduler_status():
 
 async def scheduler_loop():
     """自动化调度器：搜索→连续投递→聊天监控，支持随时开关和时间段控制。"""
-    global _scheduler_phase
+    global _scheduler_phase, scheduler_enabled
     await asyncio.sleep(5)
     log.info("[调度器] 调度器已启动，等待用户开启")
 

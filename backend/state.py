@@ -1007,5 +1007,176 @@ def _time_overlap(row: dict, block: tuple) -> bool:
     return not (_time_cmp(re, bs) <= 0 or _time_cmp(rs, be) >= 0)
 
 
+def validate_and_add_interview(conv_id: int, interview_type: str, start_time_str: str, duration_min: int, notes: str = None) -> tuple:
+    """
+    精密校验并添加面试：
+    1. 线下互斥：上午(9:00-12:00)最多1场，下午(14:00-18:00)最多1场。
+    2. 间隔时间约束：两场面试（无论是线上还是线下）之间必须有至少 60 分钟缓冲。
+    3. 通勤时间追加：如果有任何一方是 offline，间隔时间必须达到 90 分钟。
+    """
+    from datetime import datetime, timedelta
+    
+    # 格式化日期和时间
+    try:
+        # 支持 YYYY-MM-DD HH:MM 或 YYYY-MM-DD HH:MM:SS
+        start_time_str = start_time_str.strip()
+        if len(start_time_str) == 16:
+            new_start = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+        else:
+            new_start = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        return False, f"时间格式解析失败: {e}，请使用 YYYY-MM-DD HH:MM 格式"
+        
+    new_end = new_start + timedelta(minutes=duration_min)
+    interview_date = new_start.strftime("%Y-%m-%d")
+    
+    db = get_db()
+    
+    # 规则1: 线下互斥
+    if interview_type == "offline":
+        # 判定新面试的半天段：上午定义为开始时间在 12:00 之前
+        is_morning = new_start.hour < 12
+        
+        # 查询当天已有的线下安排
+        cursor = db.execute(
+            "SELECT start_time FROM interviews WHERE interview_date = ? AND interview_type = 'offline'",
+            (interview_date,)
+        )
+        existing_offline = cursor.fetchall()
+        for row in existing_offline:
+            try:
+                ext_time = datetime.strptime(row["start_time"], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                try:
+                    ext_time = datetime.strptime(row["start_time"], "%Y-%m-%d %H:%M")
+                except Exception:
+                    continue
+            ext_is_morning = ext_time.hour < 12
+            if is_morning == ext_is_morning:
+                half_day_str = "上午" if is_morning else "下午"
+                return False, f"时间冲突：同半天({half_day_str})已有线下面试安排，不允许再约线下"
+
+    # 查询当天所有已有面试（线上和线下）
+    cursor = db.execute(
+        "SELECT id, interview_type, start_time, end_time, company, job_title FROM interviews WHERE interview_date = ?",
+        (interview_date,)
+    )
+    existing_all = cursor.fetchall()
+    
+    for row in existing_all:
+        try:
+            ext_start = datetime.strptime(row["start_time"], "%Y-%m-%d %H:%M:%S")
+            ext_end = datetime.strptime(row["end_time"], "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            try:
+                ext_start = datetime.strptime(row["start_time"], "%Y-%m-%d %H:%M")
+                ext_end = datetime.strptime(row["end_time"], "%Y-%m-%d %H:%M")
+            except Exception:
+                continue
+                
+        # 判定需要的缓冲距离
+        ext_type = row["interview_type"]
+        is_any_offline = (interview_type == "offline" or ext_type == "offline")
+        required_gap = 90 if is_any_offline else 60
+        
+        # 判定重合或时间差
+        if new_start < ext_end and new_end > ext_start:
+            return False, f"时间冲突：与已有面试 {row['company']}-{row['job_title']} ({row['start_time']} 至 {row['end_time']}) 存在重合 overlap！"
+            
+        if new_start >= ext_end:
+            gap = (new_start - ext_end).total_seconds() / 60
+            if gap < required_gap:
+                gap_type_str = "通勤 + 缓冲" if is_any_offline else "缓冲"
+                return False, f"时间冲突：距离前一场面试结束仅隔 {int(gap)} 分钟，不足要求的 {required_gap} 分钟({gap_type_str})"
+                
+        if ext_start >= new_end:
+            gap = (ext_start - new_end).total_seconds() / 60
+            if gap < required_gap:
+                gap_type_str = "通勤 + 缓冲" if is_any_offline else "缓冲"
+                return False, f"时间冲突：距离后一场面试开始仅隔 {int(gap)} 分钟，不足要求的 {required_gap} 分钟({gap_type_str})"
+
+    # 校验通过，写入数据库
+    # 获取会话关联的公司和职位信息
+    cursor = db.execute(
+        "SELECT hr_company, job_title FROM conversations WHERE id = ?",
+        (conv_id,)
+    )
+    conv = cursor.fetchone()
+    company = conv["hr_company"] if conv and conv["hr_company"] else "未知公司"
+    job_title = conv["job_title"] if conv and conv["job_title"] else "未知岗位"
+    
+    db.execute(
+        """
+        INSERT INTO interviews (conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            conv_id,
+            company,
+            job_title,
+            interview_type,
+            interview_date,
+            new_start.strftime("%Y-%m-%d %H:%M:%S"),
+            new_end.strftime("%Y-%m-%d %H:%M:%S"),
+            duration_min,
+            notes
+        )
+    )
+    db.commit()
+    return True, "成功"
+
+
+def get_upcoming_interviews(days: int = 3) -> list:
+    """获取未来几天的所有面试安排列表，用于拼装 Prompt 注入"""
+    db = get_db()
+    cursor = db.execute(
+        """
+        SELECT id, conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, notes
+        FROM interviews
+        WHERE start_time >= datetime('now', 'localtime')
+        ORDER BY start_time ASC
+        """
+    )
+    # 限制筛选天数
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    limit_time = now + timedelta(days=days)
+    
+    res = []
+    for row in cursor.fetchall():
+        try:
+            st = datetime.strptime(row["start_time"], "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            try:
+                st = datetime.strptime(row["start_time"], "%Y-%m-%d %H:%M")
+            except Exception:
+                st = now
+        if st <= limit_time:
+            res.append(dict(row))
+    return res
+
+
+def get_all_interviews() -> list:
+    """获取所有面试（包括已过去和未来的，按时间倒序）"""
+    db = get_db()
+    cursor = db.execute(
+        """
+        SELECT id, conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, notes, status
+        FROM interviews
+        ORDER BY start_time DESC
+        """
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def delete_interview(interview_id: int) -> bool:
+    """删除面试记录（一键释放时间段）"""
+    db = get_db()
+    cursor = db.execute("DELETE FROM interviews WHERE id = ?", (interview_id,))
+    db.commit()
+    return cursor.rowcount > 0
+
+
 # 启动时初始化
 init_db()
+

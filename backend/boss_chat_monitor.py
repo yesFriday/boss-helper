@@ -12,7 +12,7 @@ from typing import List, Optional
 from backend.boss_applier import BossApplier
 from backend.firefox import pause
 from backend.logger import get_logger
-from backend.selectors import SELECTORS
+from backend.boss_selectors import SELECTORS
 from backend.state import (
     list_active_conversations,
     get_or_create_conversation,
@@ -834,8 +834,53 @@ class BossChatMonitor(BossApplier):
                     resume = get_setting("resume_summary", "")
                     wechat = get_setting("wechat_id", "")
 
-                    reply, interest = generate_reply(conv_id, unreplied_hr_msg, job_info, style, resume, wechat)
+                    reply, interest, extra_data = generate_reply(conv_id, unreplied_hr_msg, job_info, style, resume, wechat)
                     if reply:
+                        # 🆕 面试自动排程与冲突校验引擎 🆕
+                        if extra_data.get("interview_action") == "schedule":
+                            itype = extra_data.get("interview_type")
+                            itime = extra_data.get("interview_time")
+                            idur = extra_data.get("interview_duration", 60)
+                            
+                            from backend.state import validate_and_add_interview
+                            success, err_msg = validate_and_add_interview(conv_id, itype, itime, idur)
+                            
+                            if not success:
+                                log.warning(f"[排程] 拟约定面试 ({itype}, {itime}) 规则校验失败: {err_msg}。发起自动二次协商重算...")
+                                re_prompt = (
+                                    f"【面试排程冲突】你刚才向HR提议或确认在 {itime} 进行 {itype} 面试，"
+                                    f"但由于时间冲突未能成功预约，原因为: {err_msg}。\n"
+                                    f"请重新生成一条回复，并避开这个时间段，另外挑选一个完全符合偏好且闲置的时间段推荐给HR。"
+                                )
+                                # 调用 AI 进行回炉重构
+                                reply, interest, extra_data = generate_reply(conv_id, re_prompt, job_info, style, resume, wechat)
+                                
+                                # 二次校验（仅尝试协商一次，避免死循环）
+                                if extra_data.get("interview_action") == "schedule":
+                                    itype = extra_data.get("interview_type")
+                                    itime = extra_data.get("interview_time")
+                                    idur = extra_data.get("interview_duration", 60)
+                                    success, err_msg = validate_and_add_interview(conv_id, itype, itime, idur)
+                                    if not success:
+                                        log.warning(f"[排程] 二次排程校验依然失败: {err_msg}。本次取消自动建单，仅发送聊天内容。")
+                                        extra_data["interview_action"] = None
+                            
+                            # 如果最终校验通过，向前端广播通知
+                            if extra_data.get("interview_action") == "schedule" and success:
+                                log.info(f"[排程] 恭喜！已自动为您约好一场面试 ({itype}, {itime})。")
+                                try:
+                                    from backend.app import broadcast_ws
+                                    import asyncio
+                                    asyncio.create_task(broadcast_ws({
+                                        "type": "interview_scheduled",
+                                        "company": job_company or matched_conv.get("hr_company", "未知"),
+                                        "job_title": job_title or matched_conv.get("job_title", "未知"),
+                                        "time": itime,
+                                        "format": "线上" if itype == "online" else "线下"
+                                    }))
+                                except Exception as be:
+                                    log.error(f"WebSocket 广播面试通知失败: {be}")
+
                         # 先执行发送操作（简历/微信/电话），确保AI说"已发送"时东西已经发出去了
                         msg_lower = unreplied_hr_msg.lower()
 

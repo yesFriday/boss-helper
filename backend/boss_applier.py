@@ -10,7 +10,7 @@ from typing import Optional, List
 from backend.automation_base import AutomationBase
 from backend.firefox import pause
 from backend.logger import get_logger
-from backend.selectors import SELECTORS
+from backend.boss_selectors import SELECTORS
 from backend.state import (
     get_setting,
     get_today_application_count,

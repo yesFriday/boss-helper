@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-selectors.py — 包含 BOSS 直聘的 UI 元素选择器及合并覆盖逻辑。
+boss_selectors.py — 包含 BOSS 直聘的 UI 元素选择器及合并覆盖逻辑。
 """
 
 SELECTORS = {

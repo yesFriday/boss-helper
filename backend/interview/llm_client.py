@@ -130,19 +130,6 @@ def llm_chat_ollama(
     return response.content
 
 
-def llm_chat_deepseek(
-    messages: list, system_prompt: Optional[str] = None, temperature: float = 0.3
-) -> str:
-    """
-    调用 AI API（兼容旧接口，内部使用 LangChain ChatOpenAI）。
-    每次调用从 SQLite 实时读取配置，支持任意 OpenAI 兼容接口。
-    """
-    llm = get_llm(temperature)
-    lc_messages = _dict_messages_to_lc(messages, system_prompt)
-    response = llm.invoke(lc_messages)
-    return response.content
-
-
 def parse_json_from_llm(text: str) -> Optional[dict]:
     """从 LLM 返回文本中提取 JSON"""
     json_match = re.search(r"\{.*\}", text, re.DOTALL)
