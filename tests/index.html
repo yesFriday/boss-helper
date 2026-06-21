@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Agent 智能沟通沙箱测试</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Alpine.js for reactive data binding -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+
+    body {
+      font-family: 'Outfit', 'Noto Sans SC', sans-serif;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col" x-data="testSandbox()">
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div
+          class="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">
+          AI
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-white tracking-tight">AI Agent 智能谈判沙箱</h1>
+          <div class="text-xs text-indigo-400 font-medium">BOSS直聘自动沟通决策测试环境</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 bg-slate-800/50 border border-slate-700/50 px-3.5 py-1.5 rounded-lg text-xs">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>连接模式: 开发测试</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+    <!-- Left Column: Configurations -->
+    <section class="lg:col-span-5 space-y-6">
+
+      <!-- Profile & Settings Simulator -->
+      <div class="bg-slate-800/40 rounded-2xl p-5 border border-slate-700/50 shadow-xl backdrop-blur-sm">
+        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <span>⚙️</span> 求职者状态模拟
+        </h3>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1.5">系统基准时间 (留空默认当前时间)</label>
+            <input type="text" x-model="currentTime" placeholder="如: 2026-06-22 10:00"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all text-slate-200" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1.5">期望面试形式</label>
+              <select x-model="prefFormat"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 text-slate-200">
+                <option value="both">线上线下均可</option>
+                <option value="online">仅接受线上面试</option>
+                <option value="offline">仅接受线下面试</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1.5">微信号</label>
+              <input type="text" x-model="wechatId" placeholder="用于微信交换测试"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 transition-all text-slate-200" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1.5">简历摘要</label>
+            <textarea x-model="resumeSummary" rows="2" placeholder="用于大模型结合简历回复细节"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 transition-all text-slate-200 resize-none"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Occupied Interviews Simulator -->
+      <div class="bg-slate-800/40 rounded-2xl p-5 border border-slate-700/50 shadow-xl backdrop-blur-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <span>📅</span> 已有面试日程占用 (未来3天)
+          </h3>
+          <button @click="addOccupied()" type="button"
+            class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+            + 添加日程
+          </button>
+        </div>
+
+        <div class="space-y-3 max-h-[220px] overflow-y-auto pr-1">
+          <template x-for="(item, index) in occupiedInterviews" :key="index">
+            <div class="p-3 bg-slate-900/80 border border-slate-700/50 rounded-xl space-y-2 relative">
+              <button @click="removeOccupied(index)" type="button"
+                class="absolute top-2 right-2 text-slate-500 hover:text-rose-400 text-xs">
+                ✕
+              </button>
+              <div class="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label class="block text-[10px] text-slate-500 mb-0.5">开始时间</label>
+                  <input type="text" x-model="item.start_time" placeholder="YYYY-MM-DD HH:MM"
+                    class="w-full bg-slate-800 border border-slate-750 px-2 py-1 rounded text-slate-200 text-xs outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-slate-500 mb-0.5">结束时间</label>
+                  <input type="text" x-model="item.end_time" placeholder="YYYY-MM-DD HH:MM"
+                    class="w-full bg-slate-800 border border-slate-750 px-2 py-1 rounded text-slate-200 text-xs outline-none" />
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-xs">
+                <div class="col-span-2">
+                  <input type="text" x-model="item.company" placeholder="公司名称"
+                    class="w-full bg-slate-800 border border-slate-750 px-2 py-1 rounded text-slate-200 text-xs outline-none" />
+                </div>
+                <div>
+                  <select x-model="item.type"
+                    class="w-full bg-slate-800 border border-slate-750 px-1 py-1 rounded text-slate-200 text-xs outline-none">
+                    <option value="online">线上</option>
+                    <option value="offline">线下</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template x-if="occupiedInterviews.length === 0">
+            <div class="text-center py-6 text-xs text-slate-500">
+              当前无日程占用日程，求职者时间完全空闲
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Job Position Info Simulator -->
+      <div class="bg-slate-800/40 rounded-2xl p-5 border border-slate-700/50 shadow-xl backdrop-blur-sm">
+        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <span>💼</span> 模拟招聘岗位信息
+        </h3>
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1.5">招聘公司</label>
+              <input type="text" x-model="jobCompany" placeholder="如: 腾讯科技"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 text-slate-200" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1.5">应聘岗位名称</label>
+              <input type="text" x-model="jobTitle" placeholder="如: AI Agent 研发"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 text-slate-200" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1.5">岗位描述 (JD)</label>
+            <textarea x-model="jobDesc" rows="3" placeholder="填写岗位JD详情，用于大模型做专业匹配"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/60 text-sm outline-none focus:border-indigo-500 transition-all text-slate-200 resize-none text-xs"></textarea>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Right Column: Chat Dialog & Results -->
+    <section class="lg:col-span-7 flex flex-col space-y-6">
+
+      <!-- Interactive Chat Screen -->
+      <div
+        class="bg-slate-800/40 rounded-2xl border border-slate-700/50 shadow-xl overflow-hidden flex flex-col h-[520px]">
+        <!-- Screen Header -->
+        <div class="bg-slate-850 px-5 py-4 border-b border-slate-700/50 flex justify-between items-center">
+          <div class="flex items-center gap-3">
+            <div class="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold">HR</div>
+            <div>
+              <div class="text-sm font-semibold text-slate-200" x-text="jobCompany">腾讯科技</div>
+              <div class="text-[10px] text-slate-400" x-text="jobTitle">AI Agent 研发</div>
+            </div>
+          </div>
+          <button @click="clearHistory()" type="button" class="text-xs text-rose-400 hover:text-rose-300">
+            清空对话
+          </button>
+        </div>
+
+        <!-- Messages Box -->
+        <div class="flex-1 p-5 overflow-y-auto space-y-4 bg-slate-900/30 flex flex-col" id="chat-messages-container">
+          <!-- Welcome instructions -->
+          <div
+            class="self-center py-2 px-4 rounded-full bg-slate-800/50 text-[11px] text-slate-400 border border-slate-750">
+            在这里模拟HR发送邀约，测试 AI 的自动沟通和合理协调能力
+          </div>
+
+          <template x-for="(msg, index) in history" :key="index">
+            <div class="flex flex-col max-w-[80%]"
+              :class="msg.sender === 'me' ? 'self-end items-end' : 'self-start items-start'">
+              <div class="text-[9px] text-slate-500 mb-1" x-text="msg.sender === 'me' ? 'AI 代发 (我)' : 'HR 消息'"></div>
+              <div class="px-4 py-2.5 rounded-2xl text-sm"
+                :class="msg.sender === 'me' ? 'bg-indigo-650 text-white rounded-tr-none' : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-750'">
+                <p x-text="msg.content"></p>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="loading">
+            <div class="self-start flex flex-col max-w-[80%] items-start animate-pulse">
+              <div class="text-[9px] text-slate-500 mb-1">AI 正在思考...</div>
+              <div
+                class="px-5 py-3 rounded-2xl bg-slate-800 text-slate-500 rounded-tl-none border border-slate-750 text-xs">
+                Generating decision parameters...
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Chat Input Form -->
+        <div class="p-4 border-t border-slate-700/50 bg-slate-850">
+          <form @submit.prevent="sendMessage()" class="flex gap-3">
+            <input type="text" x-model="newMessage" placeholder="扮演 HR 说话 (例: '你好，明天上午10点线上面试有空吗？')"
+              class="flex-1 px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-sm text-slate-200 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+              :disabled="loading" />
+            <button type="submit" :disabled="loading || !newMessage.trim()"
+              class="px-5 py-3 rounded-xl font-semibold bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm flex items-center gap-2">
+              <span x-text="loading ? '执行中' : 'HR发送'"></span>
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Decision Parameters Result -->
+      <div class="bg-slate-800/40 rounded-2xl p-6 border border-slate-700/50 shadow-xl space-y-4" x-show="result">
+        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <span>🧠</span> AI 自动约面决策与动作数据
+        </h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Output Flags status card -->
+          <div class="p-4 rounded-xl border bg-slate-900/60 border-slate-700 flex flex-col justify-between">
+            <div class="text-xs text-slate-400 font-semibold">HR 兴趣度</div>
+            <div class="mt-2 flex items-baseline">
+              <span class="text-lg font-bold tracking-tight text-white capitalize"
+                x-text="result?.parsed?.interest">medium</span>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-xl border bg-slate-900/60 border-slate-700 flex flex-col justify-between">
+            <div class="text-xs text-slate-400 font-semibold">排程指令 (Action)</div>
+            <div class="mt-2 flex items-baseline">
+              <span class="text-sm font-bold text-white tracking-tight"
+                x-text="result?.parsed?.interview_action === 'schedule' ? '✅ schedule (预约面试)' : '❌ 无预约动作'"></span>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-xl border bg-slate-900/60 border-slate-700 flex flex-col justify-between">
+            <div class="text-xs text-slate-400 font-semibold">触发自动交换卡片</div>
+            <div class="mt-2 space-y-1 text-xs">
+              <div class="flex justify-between items-center">
+                <span>发简历:</span>
+                <span class="font-bold"
+                  :class="result?.parsed?.send_resume_action ? 'text-emerald-400' : 'text-slate-500'"
+                  x-text="result?.parsed?.send_resume_action ? 'True' : 'False'"></span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span>换微信:</span>
+                <span class="font-bold"
+                  :class="result?.parsed?.share_wechat_action ? 'text-emerald-400' : 'text-slate-500'"
+                  x-text="result?.parsed?.share_wechat_action ? 'True' : 'False'"></span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span>换电话:</span>
+                <span class="font-bold"
+                  :class="result?.parsed?.share_phone_action ? 'text-emerald-400' : 'text-slate-500'"
+                  x-text="result?.parsed?.share_phone_action ? 'True' : 'False'"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Schedule details -->
+        <div class="p-4 bg-indigo-950/30 border border-indigo-900/50 rounded-xl space-y-2 text-xs text-indigo-200"
+          x-show="result?.parsed?.interview_action === 'schedule'">
+          <div class="font-semibold text-sm flex items-center gap-1.5 text-indigo-300">
+            <span>📅</span> 锁单排程详情:
+          </div>
+          <div class="grid grid-cols-2 gap-2 mt-1.5">
+            <div><strong>面试时间</strong>: <span class="text-slate-100" x-text="result?.parsed?.interview_time"></span>
+            </div>
+            <div><strong>形式</strong>: <span class="text-slate-100"
+                x-text="result?.parsed?.interview_type === 'online' ? '线上面试' : '线下面试'"></span></div>
+            <div><strong>时长</strong>: <span class="text-slate-100"
+                x-text="result?.parsed?.interview_duration + ' 分钟'"></span></div>
+          </div>
+        </div>
+
+        <!-- Prompt Text Debugger -->
+        <div class="space-y-2" x-data="{ openPrompt: false }">
+          <button @click="openPrompt = !openPrompt" type="button"
+            class="w-full text-left text-xs text-slate-400 hover:text-slate-200 underline font-medium">
+            [调试信息] 查看最终喂给 AI 大模型的完整上下文 (Rendered Prompt Context)
+          </button>
+          <div
+            class="p-4 bg-slate-950 rounded-xl text-[10px] font-mono text-slate-300 overflow-x-auto whitespace-pre border border-slate-800 max-h-[300px] overflow-y-auto"
+            x-show="openPrompt" x-text="result?.rendered_prompt_context">
+          </div>
+        </div>
+
+        <!-- Raw JSON Response Debugger -->
+        <div class="space-y-2" x-data="{ openRaw: false }">
+          <button @click="openRaw = !openRaw" type="button"
+            class="w-full text-left text-xs text-slate-400 hover:text-slate-200 underline font-medium">
+            [调试信息] 查看 AI 返回的原始 JSON 响应 (Raw JSON Response)
+          </button>
+          <pre
+            class="p-4 bg-slate-950 rounded-xl text-xs font-mono text-indigo-400 overflow-x-auto border border-slate-800"
+            x-show="openRaw" x-text="result?.raw_response">
+          </pre>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <script>
+    function testSandbox() {
+      return {
+        // Form Configurations
+        currentTime: '',
+        prefFormat: 'both',
+        wechatId: 'test_wechat_abc',
+        resumeSummary: '3年大模型落地经验，熟悉RAG、LangChain，主导过企业级智能客服体和 Agent 平台研发。',
+
+        // Job Positions
+        jobCompany: '腾讯科技 (深圳) 有限公司',
+        jobTitle: '大模型平台 Agent 开发专家',
+        jobDesc: '职责描述:\n1. 负责腾讯大模型底座在实际业务中的 Agent 排程与决策链条研发。\n2. 运用 RAG 等手段优化复杂业务流回复质量。\n要求:\n1. 熟练运用 Python 与主流 Agent 开发框架（如 LangChain）。\n2. 具备优秀的人际交往沟通能力与求职素质。',
+
+        // State Collections
+        occupiedInterviews: [
+          { start_time: '2026-06-22 10:00:00', end_time: '2026-06-22 11:30:00', type: 'offline', company: '字节跳动', job: 'AI产品经理' }
+        ],
+        history: [],
+        newMessage: '',
+        loading: false,
+        result: null,
+
+        // Actions
+        addOccupied() {
+          this.occupiedInterviews.push({
+            start_time: '2026-06-22 14:00:00',
+            end_time: '2026-06-22 15:00:00',
+            type: 'online',
+            company: '腾讯招聘',
+            job: '技术架构'
+          });
+        },
+        removeOccupied(index) {
+          this.occupiedInterviews.splice(index, 1);
+        },
+        clearHistory() {
+          this.history = [];
+          this.result = null;
+        },
+        async sendMessage() {
+          if (!this.newMessage.trim()) return;
+
+          // Add HR's message to list
+          const hrMsgContent = this.newMessage;
+          this.history.push({ sender: 'hr', content: hrMsgContent });
+          this.newMessage = '';
+          this.loading = true;
+          this.result = null;
+
+          // Scroll chat box
+          this.scrollChat();
+
+          try {
+            const payload = {
+              current_time: this.currentTime || null,
+              pref_format: this.prefFormat,
+              occupied_interviews: this.occupiedInterviews,
+              company: this.jobCompany,
+              job_title: this.jobTitle,
+              job_desc: this.jobDesc,
+              resume_summary: this.resumeSummary,
+              wechat_id: this.wechatId,
+              history: this.history.slice(0, -1), // Send history except the last one (it is passed as new_hr_message)
+              new_hr_message: hrMsgContent
+            };
+
+            const response = await fetch('/api/test-reply', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'ok') {
+              this.result = data;
+              // Add AI response message to history
+              this.history.push({ sender: 'me', content: data.parsed.reply });
+            } else {
+              alert('Error generating reply: ' + (data.error || 'Unknown error'));
+            }
+          } catch (e) {
+            console.error(e);
+            alert('Failed to connect to test backend: ' + e.message);
+          } finally {
+            this.loading = false;
+            this.scrollChat();
+          }
+        },
+        scrollChat() {
+          setTimeout(() => {
+            const container = document.getElementById('chat-messages-container');
+            if (container) {
+              container.scrollTop = container.scrollHeight;
+            }
+          }, 50);
+        }
+      }
+    }
+  </script>
+</body>
+
+</html>

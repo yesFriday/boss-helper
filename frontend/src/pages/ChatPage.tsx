@@ -29,7 +29,7 @@ export function ChatPage() {
     try {
       const res = await conversationsApi.listConversations()
       useChatStore.getState().setConversations(res.conversations || [])
-    } catch {} finally { setLoading(false) }
+    } catch { } finally { setLoading(false) }
   }
 
   const selectConversation = async (id: number) => {
@@ -38,7 +38,7 @@ export function ChatPage() {
     try {
       const res = await conversationsApi.getMessages(id)
       useChatStore.getState().setMessages(res.messages || [])
-    } catch {} finally { setMsgLoading(false) }
+    } catch { } finally { setMsgLoading(false) }
   }
 
   const handleSend = async () => {
@@ -62,7 +62,7 @@ export function ChatPage() {
     try {
       await conversationsApi.toggleAutoReply(activeConvId, !conv.auto_reply_enabled)
       loadConversations()
-    } catch {}
+    } catch { }
   }
 
   const handleOpenInBrowser = async () => {

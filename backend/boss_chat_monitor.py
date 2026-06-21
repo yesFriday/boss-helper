@@ -881,41 +881,29 @@ class BossChatMonitor(BossApplier):
                                 except Exception as be:
                                     log.error(f"WebSocket 广播面试通知失败: {be}")
 
-                        # 先执行发送操作（简历/微信/电话），确保AI说"已发送"时东西已经发出去了
-                        msg_lower = unreplied_hr_msg.lower()
-
-                        # 发简历：HR明确要求简历时，且未发送过
-                        if any(kw in msg_lower for kw in ("简历", "cv", "resume")):
+                        # 先执行发送操作（简历/微信/电话），根据 AI 大模型决策的意图执行
+                        
+                        # 发简历
+                        if extra_data.get("send_resume_action") is True:
                             if not matched_conv.get("resume_sent"):
-                                log.info("[监控] HR要简历，正在发送...")
+                                log.info("[监控] AI 决定发送简历，正在发送...")
                                 if self.send_resume():
                                     from backend.state import mark_resume_sent
 
                                     mark_resume_sent(conv_id)
                                     pause(1, 2)
 
-                        # 换微信：HR主动要联系方式时
-                        wechat_keywords = (
-                            "加微信",
-                            "加个微信",
-                            "微信聊",
-                            "vx",
-                            "加v",
-                            "v我",
-                            "加个v",
-                            "微信号",
-                            "换微信",
-                        )
-                        if any(kw in msg_lower for kw in wechat_keywords):
+                        # 换微信
+                        if extra_data.get("share_wechat_action") is True:
                             if not matched_conv.get("hr_wechat"):
-                                log.info("[监控] HR要微信，正在发送...")
+                                log.info("[监控] AI 决定分享微信，正在发送...")
                                 self.send_wechat(hr_name_to_open)
                                 pause(1, 2)
 
-                        # 换电话：HR明确要电话时，且未发送过
-                        if any(kw in msg_lower for kw in ("电话", "手机号")):
+                        # 换电话
+                        if extra_data.get("share_phone_action") is True:
                             if not matched_conv.get("phone_shared"):
-                                log.info("[监控] HR要电话，正在发送...")
+                                log.info("[监控] AI 决定分享电话，正在发送...")
                                 if self.send_phone(hr_name_to_open):
                                     from backend.state import mark_phone_shared
 

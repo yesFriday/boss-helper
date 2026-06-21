@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, RefreshCw, Heart, Plus, Trash2 } from 'lucide-react'
+import { Save, RefreshCw, Heart, Plus, Trash2, Eye, EyeOff } from 'lucide-react'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useSystemStore } from '../stores/systemStore'
 import { useNotificationStore } from '../stores/notificationStore'
@@ -18,6 +18,8 @@ export function SettingsPage() {
   const { sessionStatus } = useSystemStore()
   const { addToast } = useNotificationStore()
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [testingAi, setTestingAi] = useState(false)
   const [formData, setFormData] = useState({
     greeting_template: '',
     ai_reply_style: 'professional',
@@ -73,6 +75,17 @@ export function SettingsPage() {
       }
       setTimeSlots(parsedSlots)
 
+      // Detect platform based on Base URL
+      let detectedPlatform = ''
+      if (s.ai_base_url) {
+        const found = Object.entries(AI_PLATFORMS).find(([_, cfg]) => cfg.baseUrl === s.ai_base_url)
+        if (found) {
+          detectedPlatform = found[0]
+        } else {
+          detectedPlatform = 'custom'
+        }
+      }
+
       setFormData({
         greeting_template: s.greeting_template || '',
         ai_reply_style: s.ai_reply_style || 'professional',
@@ -85,8 +98,8 @@ export function SettingsPage() {
         wechat_id: s.wechat_id || '',
         search_keywords: (s.search_keywords || '').replace(/,/g, '\n'),
         auto_reply_enabled: s.auto_reply_enabled || 'true',
-        ai_platform: '',
-        ai_api_key: '',
+        ai_platform: detectedPlatform,
+        ai_api_key: s.ai_api_key || '',
         ai_base_url: s.ai_base_url || '',
         ai_model: s.ai_model || '',
         interview_format: s.interview_format || 'both',
@@ -116,15 +129,34 @@ export function SettingsPage() {
         interview_format: formData.interview_format,
         interview_time_slots: JSON.stringify(timeSlots),
         interview_daily_limit: formData.interview_daily_limit,
-        ...(formData.ai_api_key ? { ai_api_key: formData.ai_api_key } : {}),
+        ai_api_key: formData.ai_api_key,
       })
       addToast('设置已保存', 'success')
       if (formData.ai_api_key) {
         useSettingsStore.getState().setAiKeyConfigured(true)
-        setFormData((prev) => ({ ...prev, ai_api_key: '' }))
       }
     } catch {
       addToast('保存失败', 'error')
+    }
+  }
+
+  const handleTestAi = async () => {
+    setTestingAi(true)
+    try {
+      const res = await settingsApi.testAiSettings({
+        ai_api_key: formData.ai_api_key,
+        ai_base_url: formData.ai_base_url,
+        ai_model: formData.ai_model,
+      })
+      if (res.status === 'ok') {
+        addToast(res.message, 'success')
+      } else {
+        addToast(res.message || '测试失败，请检查配置', 'error')
+      }
+    } catch (e: any) {
+      addToast(e.message || '网络请求错误，请重试', 'error')
+    } finally {
+      setTestingAi(false)
     }
   }
 
@@ -400,14 +432,24 @@ export function SettingsPage() {
           <div className="flex items-center gap-3">
             <label className="w-32 text-sm font-semibold text-slate-600 flex-shrink-0">API Key</label>
             <div className="flex-1 flex items-center gap-2">
-              <input
-                type="password"
-                value={formData.ai_api_key}
-                onChange={(e) => setFormData((prev) => ({ ...prev, ai_api_key: e.target.value }))}
-                placeholder="输入API Key"
-                className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
-              />
-              <span className="text-xs">
+              <div className="relative flex-1">
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={formData.ai_api_key}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, ai_api_key: e.target.value }))}
+                  placeholder="输入API Key"
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  title={showApiKey ? '隐藏 API Key' : '显示 API Key'}
+                >
+                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <span className="text-xs flex-shrink-0">
                 {aiKeyConfigured ? (
                   <span className="text-emerald-500 font-semibold">已配置</span>
                 ) : (
@@ -453,7 +495,19 @@ export function SettingsPage() {
               <option value="false">关闭</option>
             </select>
           </div>
-          <div className="text-xs text-slate-400 pl-32">选择平台后自动填充 Base URL 和可选模型列表</div>
+          <div className="flex items-center gap-3 pl-32 pt-1 flex-wrap">
+            <button
+              type="button"
+              onClick={handleTestAi}
+              disabled={testingAi}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+            >
+              {testingAi ? '正在测试...' : '测试 AI 配置'}
+            </button>
+            <span className="text-xs text-slate-400">
+              选择平台后自动填充 Base URL 和可选模型列表
+            </span>
+          </div>
         </div>
       </div>
 

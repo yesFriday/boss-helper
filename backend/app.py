@@ -1087,6 +1087,46 @@ async def update_settings(req: SettingsUpdate):
     return {"status": "ok", "updated": updates}
 
 
+class AITestRequest(BaseModel):
+    ai_api_key: Optional[str] = None
+    ai_base_url: Optional[str] = None
+    ai_model: Optional[str] = None
+
+
+@app.post("/api/settings/test-ai")
+def test_ai_settings(req: AITestRequest):
+    api_key = req.ai_api_key
+    base_url = req.ai_base_url
+    model = req.ai_model
+
+    if not api_key:
+        api_key = get_setting("ai_api_key", "")
+    if not base_url:
+        base_url = get_setting("ai_base_url", "https://api.deepseek.com")
+    if not model:
+        model = get_setting("ai_model", "deepseek-chat")
+
+    if not api_key:
+        return {"status": "error", "message": "API Key 不能为空"}
+
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage
+        
+        llm = ChatOpenAI(
+            model=model,
+            openai_api_key=api_key,
+            openai_api_base=base_url,
+            temperature=0.3,
+            max_retries=1,
+            timeout=15,
+        )
+        resp = llm.invoke([HumanMessage(content="Hello! Please reply with 'ok'.")])
+        return {"status": "ok", "message": f"连接成功！AI 回复: {resp.content}"}
+    except Exception as e:
+        return {"status": "error", "message": f"测试失败: {str(e)}"}
+
+
 # ══════════════════════════════════════
 #  定时调度器
 # ══════════════════════════════════════
