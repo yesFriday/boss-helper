@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { MessageSquare, ExternalLink } from 'lucide-react'
+import { MessageSquare, ExternalLink, AlertTriangle } from 'lucide-react'
 import { EmptyState } from '../components/common/EmptyState'
 import { Spinner } from '../components/common/Spinner'
 import { useChatStore } from '../stores/chatStore'
@@ -9,7 +9,8 @@ import { systemApi } from '../api/system'
 import { cn } from '../lib/cn'
 
 export function ChatPage() {
-  const { conversations, activeConvId, messages } = useChatStore()
+  const { conversations, activeConvId, messages, dangerFilter } = useChatStore()
+  const setDangerFilter = useChatStore((s) => s.setDangerFilter)
   const { addToast } = useNotificationStore()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,13 +22,18 @@ export function ChatPage() {
   }, [])
 
   useEffect(() => {
+    loadConversations()
+  }, [dangerFilter])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const loadConversations = async () => {
     setLoading(true)
     try {
-      const res = await conversationsApi.listConversations()
+      const filter = dangerFilter ? 'dangerous' : undefined
+      const res = await conversationsApi.listConversations(filter)
       useChatStore.getState().setConversations(res.conversations || [])
     } catch { } finally { setLoading(false) }
   }
@@ -86,6 +92,28 @@ export function ChatPage() {
 
       <div className="flex h-[70vh] bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="w-70 border-r border-slate-200 overflow-y-auto bg-slate-50">
+          {/* 筛选标签 */}
+          <div className="flex border-b border-slate-200 bg-white">
+            <button
+              onClick={() => setDangerFilter(false)}
+              className={cn(
+                'flex-1 py-2.5 text-xs font-semibold transition-colors cursor-pointer',
+                !dangerFilter ? 'text-indigo-600 border-b-2 border-indigo-500' : 'text-slate-400 hover:text-slate-600'
+              )}
+            >
+              全部
+            </button>
+            <button
+              onClick={() => setDangerFilter(true)}
+              className={cn(
+                'flex-1 py-2.5 text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1',
+                dangerFilter ? 'text-yellow-600 border-b-2 border-yellow-500' : 'text-slate-400 hover:text-slate-600'
+              )}
+            >
+              <AlertTriangle size={12} />
+              风险
+            </button>
+          </div>
           {loading ? (
             <div className="flex items-center justify-center py-8"><Spinner size="sm" /></div>
           ) : conversations.length > 0 ? (
@@ -95,13 +123,31 @@ export function ChatPage() {
                 onClick={() => selectConversation(conv.id)}
                 className={cn(
                   'p-3.5 cursor-pointer border-b border-slate-200 transition-all',
-                  activeConvId === conv.id ? 'bg-white border-l-3 border-l-indigo-500' : 'hover:bg-white'
+                  conv.is_dangerous ? 'bg-yellow-50 border-l-3 border-l-yellow-500' : '',
+                  activeConvId === conv.id
+                    ? conv.is_dangerous
+                      ? 'bg-yellow-100 border-l-3 border-l-yellow-600'
+                      : 'bg-white border-l-3 border-l-indigo-500'
+                    : conv.is_dangerous
+                      ? 'hover:bg-yellow-100'
+                      : 'hover:bg-white'
                 )}
               >
                 <div className="flex items-center justify-between">
-                  <div className="font-semibold text-sm text-slate-800">{conv.hr_name || '未知'}</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="font-semibold text-sm text-slate-800">{conv.hr_name || '未知'}</div>
+                    {conv.is_dangerous ? (
+                      <span className="px-1.5 py-0.5 bg-yellow-200 text-yellow-700 rounded text-xs font-bold flex items-center gap-0.5">
+                        <AlertTriangle size={10} />
+                        风险
+                      </span>
+                    ) : null}
+                  </div>
                   {conv.unread_count > 0 && (
-                    <span className="px-2 py-0.5 bg-indigo-500 text-white rounded-full text-xs font-bold">
+                    <span className={cn(
+                      'px-2 py-0.5 text-white rounded-full text-xs font-bold',
+                      conv.is_dangerous ? 'bg-yellow-500' : 'bg-indigo-500'
+                    )}>
                       {conv.unread_count}
                     </span>
                   )}

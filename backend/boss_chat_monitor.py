@@ -714,6 +714,9 @@ class BossChatMonitor(BossApplier):
                 continue
             if not matched_conv.get("auto_reply_enabled"):
                 continue
+            if matched_conv.get("is_dangerous"):
+                log.info(f"[监控] 会话 {matched_conv.get('hr_name')} 已标记为风险会话，跳过")
+                continue
 
             # 读取消息：打开会话从 DOM 提取
             hr_name_to_open = matched_conv["hr_name"]
@@ -921,6 +924,11 @@ class BossChatMonitor(BossApplier):
                                 update_conversation_interest(conv_id, interest)
                                 log.info(f"[监控] HR兴趣度: {interest}")
                             log.info("[监控] 回复已发送")
+                            # 风险会话检测：AI判定为危险则标记并永久停止后续监控
+                            if extra_data.get("danger_flag"):
+                                log.warning(f"[监控] ⚠️ 检测到风险会话: {matched_conv.get('hr_name')}，AI回复已发送，后续将永久跳过")
+                                from backend.state import mark_conversation_dangerous
+                                mark_conversation_dangerous(conv_id)
                         else:
                             log.warning("[监控] 回复发送失败!")
                         pause(5, 15)

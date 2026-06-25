@@ -2,8 +2,8 @@ import { api } from './client'
 import type { Conversation, Message } from './types'
 
 export const conversationsApi = {
-  listConversations: () =>
-    api.get<{ conversations: Conversation[] }>('/api/conversations'),
+  listConversations: (filter?: string) =>
+    api.get<{ conversations: Conversation[] }>('/api/conversations', { params: filter ? { filter } : {} }),
 
   getMessages: (id: number, limit = 100) =>
     api.get<{ messages: Message[] }>(`/api/conversations/${id}/messages?limit=${limit}`),

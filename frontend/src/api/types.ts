@@ -32,6 +32,7 @@ export interface Conversation {
   wechat_shared_at: string
   resume_sent: number
   phone_shared: number
+  is_dangerous: number
 }
 
 export interface Message {

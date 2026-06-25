@@ -42,6 +42,7 @@ class ReplyOutput(BaseModel):
     send_resume_action: Optional[bool] = Field(False, description="当且仅当HR在本次消息中明确要求发送简历、作品集或查看简历，且你同意发送时输出 true，否则输出 false。如果HR没有提出或明确表示不要，必须输出 false。")
     share_wechat_action: Optional[bool] = Field(False, description="当且仅当HR在本次消息中明确要求添加微信、换微信、换联系方式，且你同意交换时输出 true，否则输出 false。如果HR没有提出或明确表示不要，必须输出 false。")
     share_phone_action: Optional[bool] = Field(False, description="当且仅当HR在本次消息中明确要求交换电话或手机号，且你同意交换时输出 true，否则输出 false。如果HR没有提出或明确表示不要，必须输出 false。")
+    danger_flag: bool = Field(False, description="风险会话标记。当HR的最新消息或对话上下文中明确表现出对你的AI/机器人身份的怀疑，且你的解释没有打消其疑虑时输出 true；否则输出 false。详见 system prompt 中的风险检测规则。")
 
 
 # ── 输出解析器（自动注入 JSON Schema 到 System Prompt，自动解析返回值） ──
@@ -258,6 +259,37 @@ SYSTEM_PROMPT = """你是一个求职者开发的AI助手，在BOSS直聘上帮�
 - **不主动、不抢跑**：不要在 HR 没有提出要求、或你没有决定发送的情况下主动将这些 action 设为 true。
 - **防重复**：如果通过聊天上下文得知已经完成过交换（例如上一轮刚交换过，或者数据库标志已是已发送），则输出 false，不要重复触发。
 
+## 🚨 风险会话检测（danger_flag）
+
+当 HR 的最新消息或对话上下文中**明确表现出对你AI/机器人身份的怀疑，且你的简短口语化解释没有成功打消其疑虑**时，必须将 `danger_flag` 设为 `true`。
+
+`danger_flag` 为 `true` 时**不影响本轮回复**——本轮回复仍然正常发送，仅标记该会话后续不再进行AI自动回复和监听。
+
+### 检测标准（正例 —— danger_flag: true）
+以下情况 HR 明确在怀疑或测试你是否是 AI，且单靠极简口语难以彻底消除疑虑：
+- "你是机器人自动回复吧" —— 直接质疑 AI 身份
+- "回复好快啊，是AI吗" —— 怀疑回复速度异常
+- "你是不是用AI在自动回复" —— 明确询问是否使用 AI
+- "发个1+1等于几" —— HR 用数学题测试你是否是真人
+- "话术很套路啊，是自动的吧" —— 指出回复模式化
+- "怎么感觉像机器人在聊" —— 表达 AI 感很强
+- "你真的是真人吗？怎么每次回复都这么快" —— 怀疑真实性
+
+### 排除标准（反例 —— danger_flag: false）
+以下情况是正常招聘沟通，不是怀疑你是 AI：
+- "您好"、"好的我看看简历"、"谢谢"（日常寒暄，无 AI 怀疑）
+- "你之前在哪家公司"（正常面试提问）
+- "方便面试吗"（正常约面）
+- "哦哦好的"（普通回应）
+- "请问你对薪资有什么期望"（正常招聘提问）
+- "方便发份简历吗"（正常索要简历）
+- "你好，我们看了你的简历，想约个面试"（正常面试邀请）
+
+### 重要原则
+- 即使你的回复试图表现得像真人，但如果 HR 的消息**明显在试探 AI 身份且带有强烈怀疑语气**，你仍然应该将 `danger_flag` 设为 `true`。
+- `danger_flag` 为 `true` 时，仍然需要正常生成 `reply` 文本（遵循上方 🤖 应对规则：极简口语化），不要因为被标记为风险会话就放弃本轮回复。
+- 如果 HR 只是随口问了一句"是AI吗"但你的极简口语澄清（如"？真人啊"）看起来成功打消了疑虑，且 HR 后续消息回到正常招聘话题（如"好的我们聊聊岗位"），应将 `danger_flag` 设为 `false`；但如果 HR 紧接追问"真的假的"、"那你发个语音"等持续怀疑，则 `danger_flag` 应为 `true`。
+
 {format_instructions}
 
 interest 评估标准（根据完整对话判断HR当前兴趣程度）：
@@ -420,6 +452,10 @@ def generate_reply(
             interview_type = parsed.interview_type.strip().lower() if parsed.interview_type else None
             interview_time = parsed.interview_time.strip() if parsed.interview_time else None
             interview_duration = parsed.interview_duration if parsed.interview_duration else 60
+            danger_flag = bool(parsed.danger_flag)
+            send_resume_action = bool(parsed.send_resume_action)
+            share_wechat_action = bool(parsed.share_wechat_action)
+            share_phone_action = bool(parsed.share_phone_action)
         except Exception:
             # 解析失败 → 正则兜底
             reply = ""
@@ -428,6 +464,10 @@ def generate_reply(
             interview_type = None
             interview_time = None
             interview_duration = 60
+            danger_flag = False
+            send_resume_action = False
+            share_wechat_action = False
+            share_phone_action = False
             
             m = re.search(r'"reply"\s*:\s*"([^"]*)"', raw)
             if m:
@@ -447,6 +487,18 @@ def generate_reply(
             m6 = re.search(r'"interview_duration"\s*:\s*(\d+)', raw)
             if m6:
                 interview_duration = int(m6.group(1))
+            m7 = re.search(r'"danger_flag"\s*:\s*(true|false)', raw)
+            if m7:
+                danger_flag = m7.group(1).lower() == "true"
+            m8 = re.search(r'"send_resume_action"\s*:\s*(true|false)', raw)
+            if m8:
+                send_resume_action = m8.group(1).lower() == "true"
+            m9 = re.search(r'"share_wechat_action"\s*:\s*(true|false)', raw)
+            if m9:
+                share_wechat_action = m9.group(1).lower() == "true"
+            m10 = re.search(r'"share_phone_action"\s*:\s*(true|false)', raw)
+            if m10:
+                share_phone_action = m10.group(1).lower() == "true"
 
         if interest not in ("high", "medium", "low"):
             interest = ""
@@ -474,6 +526,10 @@ def generate_reply(
             "interview_type": interview_type,
             "interview_time": interview_time,
             "interview_duration": interview_duration,
+            "danger_flag": danger_flag,
+            "send_resume_action": send_resume_action,
+            "share_wechat_action": share_wechat_action,
+            "share_phone_action": share_phone_action,
         }
         return reply, interest, extra_data
 

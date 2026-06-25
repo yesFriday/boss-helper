@@ -67,6 +67,7 @@ def init_db():
             wechat_shared_at TIMESTAMP,                     -- 微信交换时间
             resume_sent INTEGER DEFAULT 0,                  -- 是否已发送简历：1=已发送, 0=未发送
             phone_shared INTEGER DEFAULT 0,                 -- 是否已交换电话：1=已交换, 0=未交换
+            is_dangerous INTEGER DEFAULT 0,                 -- 是否风险会话：1=已被HR怀疑是AI, 0=正常
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 记录创建时间
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
         );
@@ -189,6 +190,11 @@ def init_db():
     db.execute("UPDATE settings SET value='3' WHERE key='batch_delay_min_sec' AND value='30'")
     db.execute("UPDATE settings SET value='8' WHERE key='batch_delay_max_sec' AND value='90'")
     db.commit()
+    # 迁移：为已有数据库添加 is_dangerous 字段
+    try:
+        db.execute("ALTER TABLE conversations ADD COLUMN is_dangerous INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
 
 
 def _row_to_dict(row) -> Optional[dict]:
@@ -458,9 +464,17 @@ def get_conversation(conv_id: int) -> Optional[dict]:
     return _row_to_dict(get_db().execute("SELECT * FROM conversations WHERE id=?", (conv_id,)).fetchone())
 
 
-def list_active_conversations() -> List[dict]:
+def list_active_conversations(dangerous_only: bool = False) -> List[dict]:
+    if dangerous_only:
+        return _rows_to_list(
+            get_db().execute(
+                "SELECT * FROM conversations WHERE is_dangerous=1 ORDER BY updated_at DESC"
+            ).fetchall()
+        )
     return _rows_to_list(
-        get_db().execute("SELECT * FROM conversations WHERE status!='closed' ORDER BY updated_at DESC").fetchall()
+        get_db().execute(
+            "SELECT * FROM conversations WHERE status!='closed' AND is_dangerous=0 ORDER BY updated_at DESC"
+        ).fetchall()
     )
 
 
@@ -517,6 +531,15 @@ def mark_resume_sent(conv_id: int):
 
 def mark_phone_shared(conv_id: int):
     get_db().execute("UPDATE conversations SET phone_shared=1, updated_at=CURRENT_TIMESTAMP WHERE id=?", (conv_id,))
+    get_db().commit()
+
+
+def mark_conversation_dangerous(conv_id: int):
+    """标记会话为风险会话（HR怀疑是AI），后续不再进行AI监听和自动回复。"""
+    get_db().execute(
+        "UPDATE conversations SET is_dangerous=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (conv_id,),
+    )
     get_db().commit()
 
 

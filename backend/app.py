@@ -907,8 +907,9 @@ def list_wechat_exchanges():
 
 
 @app.get("/api/conversations")
-def list_conversations():
-    convs = list_active_conversations()
+def list_conversations(filter: str = ""):
+    dangerous_only = filter == "dangerous"
+    convs = list_active_conversations(dangerous_only=dangerous_only)
     return {"conversations": convs}
 
 
