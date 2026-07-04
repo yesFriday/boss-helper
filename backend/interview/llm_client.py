@@ -70,6 +70,16 @@ def get_llm(temperature: float = 0.3) -> ChatOpenAI:
     )
 
 
+def get_llm_with_tools(tools: list, temperature: float = 0.7) -> ChatOpenAI:
+    """
+    创建绑定了工具调用的 ChatOpenAI 实例（Agent 用）。
+    绑定后 LLM 可以自主决定调用 tools 中定义的工具。
+    tools 格式为 OpenAI function-calling 的 dict 列表。
+    """
+    llm = get_llm(temperature)
+    return llm.bind_tools(tools)
+
+
 def get_ollama_llm(temperature: float = 0.7) -> ChatOllama:
     """创建 LangChain ChatOllama 实例（面试出题用）。"""
     return ChatOllama(

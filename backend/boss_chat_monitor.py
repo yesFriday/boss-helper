@@ -837,83 +837,21 @@ class BossChatMonitor(BossApplier):
                     resume = get_setting("resume_summary", "")
                     wechat = get_setting("wechat_id", "")
 
-                    reply, interest, extra_data = generate_reply(conv_id, unreplied_hr_msg, job_info, style, resume, wechat)
+                    # 构建 Agent 上下文（工具调用在 Agent 循环内部完成）
+                    agent_ctx = {
+                        "automation": self,
+                        "conversation_id": conv_id,
+                        "matched_conv": matched_conv,
+                        "hr_name": hr_name_to_open,
+                        "job_info": job_info,
+                    }
+
+                    reply, interest, extra_data = generate_reply(
+                        conv_id, unreplied_hr_msg, job_info, style, resume, wechat,
+                        agent_ctx=agent_ctx
+                    )
                     if reply:
-                        # 🆕 面试自动排程与冲突校验引擎 🆕
-                        if extra_data.get("interview_action") == "schedule":
-                            itype = extra_data.get("interview_type")
-                            itime = extra_data.get("interview_time")
-                            idur = extra_data.get("interview_duration", 60)
-                            
-                            from backend.state import validate_and_add_interview
-                            success, err_msg = validate_and_add_interview(conv_id, itype, itime, idur)
-                            
-                            if not success:
-                                log.warning(f"[排程] 拟约定面试 ({itype}, {itime}) 规则校验失败: {err_msg}。发起自动二次协商重算...")
-                                re_prompt = (
-                                    f"【面试排程冲突】你刚才向HR提议或确认在 {itime} 进行 {itype} 面试，"
-                                    f"但由于时间冲突未能成功预约，原因为: {err_msg}。\n"
-                                    f"请重新生成一条回复，并避开这个时间段，另外挑选一个完全符合偏好且闲置的时间段推荐给HR。"
-                                )
-                                # 调用 AI 进行回炉重构
-                                reply, interest, extra_data = generate_reply(conv_id, re_prompt, job_info, style, resume, wechat)
-                                
-                                # 二次校验（仅尝试协商一次，避免死循环）
-                                if extra_data.get("interview_action") == "schedule":
-                                    itype = extra_data.get("interview_type")
-                                    itime = extra_data.get("interview_time")
-                                    idur = extra_data.get("interview_duration", 60)
-                                    success, err_msg = validate_and_add_interview(conv_id, itype, itime, idur)
-                                    if not success:
-                                        log.warning(f"[排程] 二次排程校验依然失败: {err_msg}。本次取消自动建单，仅发送聊天内容。")
-                                        extra_data["interview_action"] = None
-                            
-                            # 如果最终校验通过，向前端广播通知
-                            if extra_data.get("interview_action") == "schedule" and success:
-                                log.info(f"[排程] 恭喜！已自动为您约好一场面试 ({itype}, {itime})。")
-                                try:
-                                    from backend.app import broadcast_ws
-                                    import asyncio
-                                    asyncio.create_task(broadcast_ws({
-                                        "type": "interview_scheduled",
-                                        "company": job_company or matched_conv.get("hr_company", "未知"),
-                                        "job_title": job_title or matched_conv.get("job_title", "未知"),
-                                        "time": itime,
-                                        "format": "线上" if itype == "online" else "线下"
-                                    }))
-                                except Exception as be:
-                                    log.error(f"WebSocket 广播面试通知失败: {be}")
-
-                        # 先执行发送操作（简历/微信/电话），根据 AI 大模型决策的意图执行
-                        
-                        # 发简历
-                        if extra_data.get("send_resume_action") is True:
-                            if not matched_conv.get("resume_sent"):
-                                log.info("[监控] AI 决定发送简历，正在发送...")
-                                if self.send_resume():
-                                    from backend.state import mark_resume_sent
-
-                                    mark_resume_sent(conv_id)
-                                    pause(1, 2)
-
-                        # 换微信
-                        if extra_data.get("share_wechat_action") is True:
-                            if not matched_conv.get("hr_wechat"):
-                                log.info("[监控] AI 决定分享微信，正在发送...")
-                                self.send_wechat(hr_name_to_open)
-                                pause(1, 2)
-
-                        # 换电话
-                        if extra_data.get("share_phone_action") is True:
-                            if not matched_conv.get("phone_shared"):
-                                log.info("[监控] AI 决定分享电话，正在发送...")
-                                if self.send_phone(hr_name_to_open):
-                                    from backend.state import mark_phone_shared
-
-                                    mark_phone_shared(conv_id)
-                                    pause(1, 2)
-
-                        # 然后再发送AI回复
+                        # 发送回复（工具操作已在 Agent 内部完成）
                         log.info(f"[监控] AI回复: {reply[:60]}...")
                         if self.send_message(reply):
                             add_message(conv_id, "me", reply, ai_generated=True)
@@ -924,11 +862,9 @@ class BossChatMonitor(BossApplier):
                                 update_conversation_interest(conv_id, interest)
                                 log.info(f"[监控] HR兴趣度: {interest}")
                             log.info("[监控] 回复已发送")
-                            # 风险会话检测：AI判定为危险则标记并永久停止后续监控
-                            if extra_data.get("danger_flag"):
-                                log.warning(f"[监控] ⚠️ 检测到风险会话: {matched_conv.get('hr_name')}，AI回复已发送，后续将永久跳过")
-                                from backend.state import mark_conversation_dangerous
-                                mark_conversation_dangerous(conv_id)
+                            # 风险会话检测：Agent 内部通过 mark_dangerous 工具处理
+                            if matched_conv.get("is_dangerous"):
+                                log.warning(f"[监控] ⚠️ 会话已标记为风险: {matched_conv.get('hr_name')}")
                         else:
                             log.warning("[监控] 回复发送失败!")
                         pause(5, 15)
