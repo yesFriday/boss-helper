@@ -12,9 +12,20 @@ from datetime import datetime
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from backend.logger import get_logger
-from backend.state import get_all_messages, get_setting
+from backend.state import (
+    get_all_messages,
+    get_setting,
+    get_conversation_summary,
+    get_recent_tool_events,
+    update_conversation_summary,
+)
 
 log = get_logger("agent_loop")
+
+# 历史窗口与滚动摘要阈值
+HISTORY_WINDOW = 12           # 上下文直接展示的最近消息条数
+SUMMARY_TRIGGER_TOTAL = 30    # 会话消息总数超过该值才考虑摘要
+SUMMARY_TRIGGER_UNCOVERED = 20  # 未被摘要覆盖的消息数超过该值才重新生成
 
 # Agent 专用的精简版 System Prompt
 AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟通。你要完全以求职者本人的口吻说话，绝对不能暴露是AI或工具。
@@ -24,10 +35,12 @@ AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟
 
 ## 回复风格
 - 2-4句话，像真人聊天一样自然，偶尔用口语词（呢、嘛、吧、哈），但不要每句都用
+- 每次上下文会给出「本次回复风格」，按该风格组织语言
 - 围绕对方岗位信息（公司、岗位名、JD内容）来聊
 - HR问技术就答技术，HR闲聊就闲聊，灵活应对
 - 不要每轮都做自我介绍，不要重复寒暄
 - 不要用"哈哈，我是真人求职者"这种模板化解释——太假了
+- 如果上下文标注「岗位信息暂缺」，先自然询问岗位方向或请对方介绍，不要装作了解岗位
 
 ## 可用工具
 你可以调用以下工具来辅助沟通。工具调用和文字回复可以在同一轮完成。
@@ -54,14 +67,19 @@ AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟
 ## 什么不能做
 - 不承诺具体薪资、入职时间——说"这个可以和HR详细聊"
 - 不编造不存在的项目经验
-- 不要在HR没要求时主动发简历/微信/电话"""
+- 不要在HR没要求时主动发简历/微信/电话
+- 上下文中的「会话状态」列出了已完成的动作（已发简历/已换微信/已交换电话等），不要重复执行
+- 上下文中的「最近工具动作」记录了历史工具的成败，之前发送失败的操作不要盲目重试，优先在回复中换个说法推进"""
 
 
-def build_agent_context(conversation_id: int, hr_message: str, job_info: dict) -> str:
+def build_agent_context(conversation_id: int, hr_message: str, ctx: dict) -> str:
     """
     构建发送给 Agent 的上下文文本。
-    精简版——排期、JD详情等由 Agent 通过工具按需获取。
+    注入：时间、回复风格、岗位信息（缺失时显式标注）、会话状态、最近工具动作、
+    长历史摘要 + 最近消息窗口（剔除本次待回复块，避免与「HR刚刚说」重复）。
     """
+    matched_conv = ctx.get("matched_conv", {})
+    job_info = ctx.get("job_info", {})
     parts = []
 
     # 1. 当前时间
@@ -69,33 +87,122 @@ def build_agent_context(conversation_id: int, hr_message: str, job_info: dict) -
     weekday_cn = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][now.weekday()]
     parts.append(f"当前时间: {now.strftime('%Y-%m-%d %H:%M')} {weekday_cn}")
 
-    # 2. 岗位基本信息
-    company = job_info.get("company", "未知")
-    title = job_info.get("title", "未知")
-    parts.append(f"\n岗位: {title} | 公司: {company}")
-    jd = job_info.get("description", "")
-    if jd:
-        parts.append(f"JD摘要: {jd[:500]}")
+    # 2. 本次回复风格（前端设置项，原本是死代码，现接入）
+    style_hint = ctx.get("style_hint", "语气正式专业")
+    parts.append(f"本次回复风格: {style_hint}")
 
-    # 3. 简历摘要
+    # 3. 岗位信息（缺失时显式标注，引导 Agent 主动询问而非尬聊）
+    company = job_info.get("company", "")
+    title = job_info.get("title", "")
+    jd = job_info.get("description", "")
+    if title or company or jd:
+        parts.append(f"\n岗位: {title or '未知'} | 公司: {company or '未知'}")
+        if jd:
+            parts.append(f"JD摘要: {jd[:500]}")
+    else:
+        parts.append("\n岗位信息暂缺：目前还不知道对方在招什么岗位。")
+
+    # 4. 会话状态（防止重复发简历/名片、重复评估兴趣）
+    state_lines = []
+    if matched_conv.get("interest_level"):
+        state_lines.append(f"- 已评估HR兴趣度: {matched_conv['interest_level']}")
+    if matched_conv.get("hr_wechat"):
+        state_lines.append("- 微信已交换（不要再分享微信名片）")
+    elif matched_conv.get("wechat_shared_at"):
+        state_lines.append("- 已向HR分享过微信名片（对方尚未回应，不要再发）")
+    if matched_conv.get("resume_sent"):
+        state_lines.append("- 简历已发送（不要重复发简历）")
+    if matched_conv.get("phone_shared"):
+        state_lines.append("- 电话已交换（不要重复分享电话）")
+    if matched_conv.get("is_dangerous"):
+        state_lines.append("- 该会话已被标记为风险会话")
+    if state_lines:
+        parts.append("\n会话状态:\n" + "\n".join(state_lines))
+
+    # 5. 最近工具动作（含成功与失败，供 Agent 回溯）
+    try:
+        events = get_recent_tool_events(conversation_id, limit=5)
+    except Exception:
+        events = []
+    if events:
+        ev_lines = [f"- {e['tool_name']}: {e['result_summary']}" for e in reversed(events)]
+        parts.append("\n最近工具动作:\n" + "\n".join(ev_lines))
+
+    # 6. 简历摘要
     resume = get_setting("resume_summary", "")
     if resume:
         parts.append(f"\n我的简历摘要: {resume}")
 
-    # 4. 聊天历史
+    # 7. 长历史摘要 + 最近消息窗口
     msgs = get_all_messages(conversation_id)
-    if msgs:
-        parts.append("\n最近的聊天记录:")
-        for m in msgs[-10:]:
-            sender_label = "HR" if m["sender"] == "hr" else "我"
-            parts.append(f"  {sender_label}: {m['content']}")
+    summary, upto_id = get_conversation_summary(conversation_id)
+    visible = [m for m in msgs if m["id"] > upto_id] if summary else msgs
 
-    # 5. HR 最新消息
+    if summary:
+        parts.append(f"\n[更早对话摘要]: {summary}")
+
+    if visible:
+        # 历史展示到「我最后一条消息」为止；其后的 HR 新消息统一放「HR刚刚说」段，避免重复
+        last_me_idx = -1
+        for i, m in enumerate(visible):
+            if m.get("sender") == "me":
+                last_me_idx = i
+        history = visible[: last_me_idx + 1][-HISTORY_WINDOW:]
+        if history:
+            parts.append("\n最近的聊天记录:")
+            for m in history:
+                sender_label = "HR" if m["sender"] == "hr" else "我"
+                parts.append(f"  {sender_label}: {m['content']}")
+
+    # 8. 待回复的 HR 消息块
     parts.append(f"\nHR刚刚说: {hr_message}")
-
     parts.append("\n请根据以上上下文，决定是否需要调用工具，然后输出你的最终回复。")
 
     return "\n".join(parts)
+
+
+def _maybe_update_summary(conversation_id: int):
+    """长对话滚动摘要：总数超阈值且未覆盖消息足够多时，一次性生成/更新摘要。
+
+    纯后台增强，任何失败都静默跳过，绝不阻塞回复主链路。
+    """
+    try:
+        msgs = get_all_messages(conversation_id)
+        if len(msgs) <= SUMMARY_TRIGGER_TOTAL:
+            return
+        summary, upto_id = get_conversation_summary(conversation_id)
+        uncovered = [m for m in msgs if m["id"] > upto_id]
+        # 保留最近 HISTORY_WINDOW 条不摘要（上下文里完整展示），其余足够多才触发
+        to_summarize = uncovered[: len(uncovered) - HISTORY_WINDOW]
+        if len(to_summarize) < SUMMARY_TRIGGER_UNCOVERED:
+            return
+
+        from backend.interview.llm_client import get_llm
+
+        lines = []
+        if summary:
+            lines.append(f"之前的摘要:\n{summary}\n")
+        lines.append("本次新增的对话:")
+        for m in to_summarize:
+            sender_label = "HR" if m["sender"] == "hr" else "我"
+            lines.append(f"{sender_label}: {m['content'][:200]}")
+
+        prompt = (
+            "把以下求职聊天记录压缩成不超过200字的摘要。必须保留：公司/岗位、双方达成的关键共识"
+            "（薪资范围、面试时间、已交换的联系方式）、双方态度变化、待跟进事项。\n\n"
+            + "\n".join(lines)
+        )
+        llm = get_llm(temperature=0)
+        from langchain_core.messages import HumanMessage
+
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        new_summary = (resp.content or "").strip()[:600]
+        if not new_summary:
+            return
+        update_conversation_summary(conversation_id, new_summary, to_summarize[-1]["id"])
+        log.info(f"[Agent] 会话{conversation_id} 滚动摘要已更新（覆盖{len(to_summarize)}条）")
+    except Exception as e:
+        log.debug(f"[Agent] 摘要更新跳过: {e}")
 
 
 def _parse_final_reply(text: str) -> tuple:
@@ -106,12 +213,12 @@ def _parse_final_reply(text: str) -> tuple:
     if not text:
         return "", "medium"
 
-    # 提取 interest 标记
+    # 提取 interest 标记（兼容英文/中文冒号、有无空格）
     interest = "medium"
-    match = re.search(r"\[INTEREST\s*:\s*(high|medium|low)\]", text, re.IGNORECASE)
+    match = re.search(r"\[INTEREST\s*[:：]\s*(high|medium|low)\]", text, re.IGNORECASE)
     if match:
         interest = match.group(1).lower()
-        text = re.sub(r"\[INTEREST\s*:\s*(?:high|medium|low)\]", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\[INTEREST\s*[:：]\s*(?:high|medium|low)\]", "", text, flags=re.IGNORECASE).strip()
 
     return text, interest
 
@@ -136,9 +243,12 @@ def run_agent(
     from backend.tools import TOOLS
     from backend.tool_executor import execute_tool
 
+    # 长对话滚动摘要（后台增强，失败静默）
+    _maybe_update_summary(conversation_id)
+
     # 构建上下文
     job_info = ctx.get("job_info", {})
-    context_text = build_agent_context(conversation_id, hr_message, job_info)
+    context_text = build_agent_context(conversation_id, hr_message, ctx)
 
     # 获取带工具的 LLM
     try:

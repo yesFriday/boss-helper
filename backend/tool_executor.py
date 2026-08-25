@@ -7,8 +7,17 @@
 import json
 from datetime import datetime, timedelta
 from backend.logger import get_logger
+from backend.state import record_tool_event
 
 log = get_logger("tool_executor")
+
+
+def _record(ctx: dict, tool_name: str, result_summary: str):
+    """记录有副作用的工具调用结果（成功与失败都记），供后续轮次上下文回溯。"""
+    try:
+        record_tool_event(ctx.get("conversation_id"), tool_name, result_summary)
+    except Exception as e:
+        log.debug(f"工具事件记录失败: {e}")
 
 
 def execute_tool(tool_name: str, tool_args: dict, ctx: dict) -> str:
@@ -61,8 +70,10 @@ def _exec_send_resume(ctx: dict) -> str:
         from backend.state import mark_resume_sent
         mark_resume_sent(conv_id)
         matched_conv["resume_sent"] = True
+        _record(ctx, "send_resume", "简历发送成功")
         return "简历已成功通过BOSS发送。在你的回复中告知HR已发送。"
     else:
+        _record(ctx, "send_resume", "简历发送失败（未找到发简历按钮）")
         return "简历发送失败（可能页面没有找到发简历按钮）。请在你的回复中告知HR稍后再试或让加微信发。"
 
 
@@ -80,8 +91,10 @@ def _exec_share_wechat(ctx: dict) -> str:
 
     success = automation.send_wechat(hr_name)
     if success:
+        _record(ctx, "share_wechat", "微信名片分享成功")
         return "微信名片已通过BOSS分享。在你的回复中告知HR（注意：回复里不要含有'微信'这两个字，BOSS会过滤）。"
     else:
+        _record(ctx, "share_wechat", "微信名片分享失败")
         return "微信分享失败。请在你的回复中告知HR稍等或换种方式。"
 
 
@@ -103,8 +116,10 @@ def _exec_share_phone(ctx: dict) -> str:
         from backend.state import mark_phone_shared
         mark_phone_shared(conv_id)
         matched_conv["phone_shared"] = True
+        _record(ctx, "share_phone", "电话分享成功")
         return "电话已通过BOSS分享。在你的回复中告知HR已发送。"
     else:
+        _record(ctx, "share_phone", "电话分享失败")
         return "电话分享失败。请在你的回复中告知HR稍等。"
 
 
@@ -208,8 +223,10 @@ def _exec_propose_interview(tool_args: dict, ctx: dict) -> str:
     success, err_msg = validate_and_add_interview(conv_id, interview_type, start_time, duration_min, notes)
 
     if success:
+        _record(ctx, "propose_interview", f"面试创建成功: {start_time} ({interview_type})")
         return f"面试已成功创建: {start_time} ({interview_type})，时长{duration_min}分钟。在你的回复中告知HR已确认。"
     else:
+        _record(ctx, "propose_interview", f"面试创建失败: {err_msg[:80]}")
         # 构建失败回复，附带备选建议
         return f"**面试时间创建失败**: {err_msg}\n请根据此冲突原因，在回复中重新与HR协商备选时间。不要再尝试创建这个时间。"
 
@@ -224,4 +241,5 @@ def _exec_mark_dangerous(ctx: dict) -> str:
     matched_conv["is_dangerous"] = True
 
     hr_name = matched_conv.get("hr_name", "未知")
+    _record(ctx, "mark_dangerous", f"会话已被标记为风险会话")
     return f"已将会话「{hr_name}」标记为风险会话，后续不再自动回复。你的本轮回复正常发送即可。"

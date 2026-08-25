@@ -5,9 +5,9 @@
 
 import logging
 import sys
-from pathlib import Path
+from backend.path_config import get_boss_data_dir
 
-LOG_DIR = Path(__file__).parent.parent / ".boss_profile"
+LOG_DIR = get_boss_data_dir()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "boss.log"
 

@@ -60,6 +60,7 @@ from backend.state import (
     is_in_shortlist,
 )
 from backend.replier import generate_greeting
+from backend.scheduler import Scheduler, SchedulerDeps
 
 # ── FastAPI 应用 ──
 app = FastAPI(title="BOSS直聘自动化控制台", version="1.0.0")
@@ -81,16 +82,77 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 automation: Optional[BossAutomation] = None
 monitor_task: Optional[asyncio.Task] = None
 scheduler_task: Optional[asyncio.Task] = None
+scheduler: Optional["Scheduler"] = None
 ws_clients: List[WebSocket] = []
 monitor_paused: bool = False
-scheduler_enabled: bool = False
 browser_sync_lock: Optional[asyncio.Lock] = None
-search_cancelled: bool = False  # 搜索取消标志
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "service": "bosshelper_backend", "version": "1.0.0"}
+
+
+@app.post("/api/system/shutdown")
+async def shutdown_system():
+    log.info("收到关机请求，正在退出服务...")
+    asyncio.create_task(_graceful_shutdown())
+    return {"status": "shutting_down"}
+
+
+async def _graceful_shutdown():
+    await asyncio.sleep(0.5)
+    global automation
+    if scheduler_task and not scheduler_task.done():
+        scheduler_task.cancel()
+    if automation:
+        try:
+            automation.stop()
+        except Exception:
+            pass
+    sys.exit(0)
+
+
+def _build_scheduler_deps() -> SchedulerDeps:
+    async def _save_jobs(keyword: str, city_code: str) -> tuple:
+        if automation is None:
+            return 0, 0
+        jobs = await _run_pw(automation.search, keyword, city_code)
+        saved = 0
+        for j in jobs:
+            j["url"] = _normalize_job_url(j.get("url", ""))
+            if j.get("url"):
+                existing = get_application_by_url(j["url"])
+                if existing:
+                    update_application_from_job(existing["id"], j)
+                else:
+                    aid = add_application(j)
+                    if aid:
+                        saved += 1
+        return len(jobs), saved
+
+    def _set_monitor_paused(v: bool):
+        global monitor_paused
+        monitor_paused = v
+
+    return SchedulerDeps(
+        get_setting=get_setting,
+        set_setting=set_setting,
+        run_pw=_run_pw,
+        get_automation=lambda: automation,
+        broadcast=broadcast_ws,
+        city_code=lambda city: CITY_MAP.get(city, "101280100"),
+        save_jobs=_save_jobs,
+        pending_jobs=get_pending_applications_by_activity,
+        today_count=get_today_application_count,
+        set_monitor_paused=_set_monitor_paused,
+        get_monitor_paused=lambda: monitor_paused,
+        monitor_alive=lambda: monitor_task is not None and not monitor_task.done(),
+        run_chat_cycle=lambda: _run_pw(automation.run_chat_monitor_cycle),
+    )
 
 
 @app.on_event("startup")
 async def on_startup():
-    global automation, monitor_task, scheduler_task, browser_sync_lock
+    global automation, monitor_task, scheduler_task, browser_sync_lock, scheduler
     browser_sync_lock = asyncio.Lock()
     # 清理旧垃圾会话 + 合并同名重复会话
     try:
@@ -120,10 +182,18 @@ async def on_startup():
         db.commit()
     except Exception:
         pass
+    # 清理历史存库的 BOSS 系统通知（一次性迁移，幂等）
+    try:
+        from backend.state import purge_system_notifications
+
+        purge_system_notifications()
+    except Exception:
+        pass
     if automation is not None and automation.page is not None:
         monitor_task = asyncio.create_task(chat_monitor_loop())
-    # 启动定时调度器
-    scheduler_task = asyncio.create_task(scheduler_loop())
+    # 启动定时调度器(状态从 settings 表恢复)
+    scheduler = Scheduler(_build_scheduler_deps())
+    scheduler_task = asyncio.create_task(scheduler.run())
 
 
 # Playwright 同步 API 要求所有操作在同一线程 —— 用单线程池保证
@@ -1129,247 +1199,30 @@ def test_ai_settings(req: AITestRequest):
 
 
 # ══════════════════════════════════════
-#  定时调度器
+#  定时调度器(API 委托 backend.scheduler)
 # ══════════════════════════════════════
-
-# 调度器状态（内存中）
-_scheduler_log: List[dict] = []
-_scheduler_phase: str = "idle"  # idle / searching / applying / paused
-
-
-def _get_current_range_key(config: dict):
-    """返回当前时间匹配的时间段 key，无匹配返回 None。"""
-    from datetime import datetime
-    now = datetime.now()
-    if now.isoweekday() not in config.get("days", []):
-        return None
-    current_time = now.strftime("%H:%M")
-    for tr in config.get("time_ranges", []):
-        start = tr.get("start", "")
-        end = tr.get("end", "")
-        if start <= current_time <= end:
-            return f"{start}~{end}"
-    return None
-
-
-def _add_scheduler_log(tasks: list):
-    """记录一条调度日志并广播。"""
-    from datetime import datetime
-    entry = {"time": datetime.now().strftime("%H:%M"), "tasks": tasks}
-    _scheduler_log.append(entry)
-    if len(_scheduler_log) > 50:
-        _scheduler_log.pop(0)
-    log.info(f"[调度器] {' | '.join(tasks)}")
-    return entry
-
-
-async def _scheduler_search_jobs(keyword: str, city_code: str) -> tuple:
-    """搜索岗位并存入数据库，返回 (总数, 新增数)。"""
-    jobs = await _run_pw(automation.search, keyword, city_code)
-    saved = 0
-    for j in jobs:
-        j["url"] = _normalize_job_url(j.get("url", ""))
-        if j.get("url"):
-            existing = get_application_by_url(j["url"])
-            if existing:
-                update_application_from_job(existing["id"], j)
-            else:
-                aid = add_application(j)
-                if aid:
-                    saved += 1
-    return len(jobs), saved
 
 
 @app.get("/api/scheduler")
 def get_scheduler_config():
-    global scheduler_enabled
-    raw = get_setting("scheduler_config", "{}")
-    try:
-        config = json.loads(raw)
-    except Exception:
-        config = {}
-    config.setdefault("days", [])
-    config.setdefault("time_ranges", [])
-    config.setdefault("auto_apply", {"keyword": "AI Agent", "city": "广州", "daily_limit": 30, "hr_active_filter": "在线,刚刚活跃,今日活跃,3日内活跃,本周活跃,本月活跃"})
-    config.setdefault("auto_reply", {"style": "professional"})
-    config["enabled"] = scheduler_enabled
-    return {"config": config}
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="调度器未初始化")
+    return {"config": scheduler.get_config()}
 
 
 @app.put("/api/scheduler")
 async def update_scheduler_config(req: dict):
-    global scheduler_enabled
-    scheduler_enabled = bool(req.get("enabled", False))
-    db_config = {k: v for k, v in req.items() if k != "enabled"}
-    set_setting("scheduler_config", json.dumps(db_config, ensure_ascii=False))
-    req["enabled"] = scheduler_enabled
-    await broadcast_ws({"type": "scheduler_config_updated", "config": req})
-    return {"status": "ok"}
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="调度器未初始化")
+    config = await scheduler.update_config(req)
+    return {"status": "ok", "config": config}
 
 
 @app.get("/api/scheduler/status")
 def get_scheduler_status():
-    global scheduler_enabled, _scheduler_phase
-    raw = get_setting("scheduler_config", "{}")
-    try:
-        config = json.loads(raw)
-    except Exception:
-        config = {}
-    daily_limit = config.get("auto_apply", {}).get("daily_limit", 30)
-    return {
-        "active": scheduler_enabled,
-        "phase": _scheduler_phase,
-        "today_count": get_today_application_count(),
-        "daily_limit": daily_limit,
-        "execution_log": _scheduler_log[-20:],
-    }
-
-
-async def scheduler_loop():
-    """自动化调度器：搜索→连续投递→聊天监控，支持随时开关和时间段控制。"""
-    global _scheduler_phase, scheduler_enabled
-    await asyncio.sleep(5)
-    log.info("[调度器] 调度器已启动，等待用户开启")
-
-    while True:
-        try:
-            await asyncio.sleep(30)
-
-            if not scheduler_enabled:
-                _scheduler_phase = "idle"
-                continue
-
-            raw = get_setting("scheduler_config", "{}")
-            try:
-                config = json.loads(raw)
-            except Exception:
-                continue
-
-            in_range = _get_current_range_key(config) is not None
-
-            # ── 聊天监控：始终执行 ──
-            if automation and automation.page:
-                try:
-                    result = await _run_pw(automation.run_chat_monitor_cycle)
-                    if result.get("replies_sent", 0) > 0:
-                        entry = _add_scheduler_log([f"AI回复{result['replies_sent']}条"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                        await broadcast_ws({"type": "auto_reply_sent", "summary": result})
-                    if result.get("new_messages", 0) > 0:
-                        await broadcast_ws({"type": "new_messages", "summary": result})
-                except Exception as e:
-                    log.error(f"[调度器] 聊天监控异常: {e}", exc_info=True)
-
-            # ── 不在时间段内 → 暂停搜索和投递 ──
-            if not in_range:
-                _scheduler_phase = "paused"
-                continue
-
-            # ── 浏览器未就绪 ──
-            if not automation or not automation.page:
-                continue
-
-            # ── 搜索+投递 ──
-            auto_cfg = config.get("auto_apply", {})
-            keyword = auto_cfg.get("keyword", "AI Agent")
-            city = auto_cfg.get("city", "广州")
-            city_code = CITY_MAP.get(city, "101280100")
-            daily_limit = auto_cfg.get("daily_limit", 30)
-            hr_active_filter = auto_cfg.get("hr_active_filter", "all")
-
-            # 暂停聊天监控，避免浏览器冲突
-            global monitor_paused
-            was_paused = monitor_paused
-            monitor_paused = True
-
-            try:
-                # 搜索前安全检查
-                if not await _run_pw(automation.check_page_safety):
-                    scheduler_enabled = False
-                    entry = _add_scheduler_log(["页面异常(验证码/登录失效)，已停止定时任务"])
-                    await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                    await broadcast_ws({"type": "safety_warning", "message": "检测到页面异常，定时任务已自动停止"})
-                    continue
-
-                # 搜索：数据库没有待投岗位才搜索
-                pending = get_pending_applications_by_activity(1, hr_active_filter)
-                if not pending:
-                    _scheduler_phase = "searching"
-                    try:
-                        total, saved = await _scheduler_search_jobs(keyword, city_code)
-                        entry = _add_scheduler_log([f"搜索「{keyword}」{total}条，保存{saved}条"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                        await broadcast_ws({"type": "search_complete", "keyword": keyword, "city": city, "found": total})
-                    except Exception as e:
-                        log.error(f"[调度器] 搜索失败: {e}", exc_info=True)
-                        entry = _add_scheduler_log([f"搜索失败: {e}"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-
-                # 投递：连续投递直到达到上限
-                _scheduler_phase = "applying"
-                while scheduler_enabled:
-                    applied = get_today_application_count()
-                    if applied >= daily_limit:
-                        entry = _add_scheduler_log([f"今日已投递{applied}条，达到上限"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                        break
-
-                    # 每轮投递前安全检查
-                    if not await _run_pw(automation.check_page_safety):
-                        scheduler_enabled = False
-                        entry = _add_scheduler_log(["页面异常(验证码/登录失效)，已停止定时任务"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                        await broadcast_ws({"type": "safety_warning", "message": "检测到页面异常，定时任务已自动停止"})
-                        break
-
-                    remaining = daily_limit - applied
-                    pending = get_pending_applications_by_activity(remaining, hr_active_filter)
-
-                    # 没有待投岗位 → 补充搜索
-                    if not pending:
-                        log.info("[调度器] 待投岗位不足，补充搜索")
-                        try:
-                            total, saved = await _scheduler_search_jobs(keyword, city_code)
-                            entry = _add_scheduler_log([f"补充搜索{total}条，保存{saved}条"])
-                            await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                        except Exception as e:
-                            log.error(f"[调度器] 补充搜索失败: {e}", exc_info=True)
-                            break
-                        pending = get_pending_applications_by_activity(remaining, hr_active_filter)
-                        if not pending:
-                            entry = _add_scheduler_log(["无更多待投岗位"])
-                            await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                            break
-
-                    # 执行投递
-                    urls = [p["job_url"] for p in pending if p.get("job_url")]
-                    try:
-                        results = await _run_pw(automation.apply_batch, urls[:remaining], None, daily_limit)
-                        ok = sum(1 for r in results if r.get("success"))
-                        entry = _add_scheduler_log([f"投递{len(results)}条，成功{ok}条"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                    except Exception as e:
-                        log.error(f"[调度器] 投递异常: {e}", exc_info=True)
-                        entry = _add_scheduler_log([f"投递异常: {e}"])
-                        await broadcast_ws({"type": "scheduler_tick", "log": entry})
-                        break
-
-                    # 检查是否被用户停止
-                    if not scheduler_enabled:
-                        break
-
-                _scheduler_phase = "idle"
-
-            finally:
-                monitor_paused = was_paused
-
-        except asyncio.CancelledError:
-            log.info("[调度器] 调度器已停止")
-            _scheduler_phase = "idle"
-            break
-        except Exception as e:
-            log.error(f"[调度器] 异常: {e}", exc_info=True)
-            await asyncio.sleep(30)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="调度器未初始化")
+    return scheduler.get_status()
 
 
 # ══════════════════════════════════════
@@ -1554,13 +1407,19 @@ except Exception as e:
 
 
 def main():
+    import os
     import uvicorn
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8010)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--auto-start", action="store_true", help="启动时自动打开浏览器")
+    parser.add_argument("--user-data-dir", type=str, default=None, help="自定义数据与配置文件存储目录")
     args = parser.parse_args()
+
+    if args.user_data_dir:
+        os.environ["BOSS_DATA_DIR"] = args.user_data_dir
+        log.info(f"使用数据路径: {args.user_data_dir}")
 
     if args.auto_start:
         global automation, monitor_task

@@ -84,6 +84,7 @@ export interface Settings {
   ai_base_url: string
   ai_model: string
   ai_key_configured: string
+  ai_api_key?: string
   interview_format?: string
   interview_time_slots?: string
   interview_daily_limit?: string

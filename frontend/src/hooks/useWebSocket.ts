@@ -98,8 +98,11 @@ export function useWebSocket() {
   const connect = useCallback(() => {
     if (!mountedRef.current) return
 
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${location.host}/ws`)
+    const isDefaultPort = typeof window !== 'undefined' && location.port === '8010'
+    const wsUrl = isDefaultPort
+      ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`
+      : 'ws://127.0.0.1:8010/ws'
+    const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
     ws.onopen = () => {

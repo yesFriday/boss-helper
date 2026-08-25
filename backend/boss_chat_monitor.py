@@ -23,6 +23,8 @@ from backend.state import (
     get_today_auto_reply_count,
     get_setting,
     get_application,
+    get_application_by_hr_name,
+    is_system_notification,
     add_message,
     increment_daily_stat,
     update_conversation_interest,
@@ -31,6 +33,29 @@ from backend.state import (
 log = get_logger("boss_chat_monitor")
 
 MAX_AUTO_REPLY_PER_DAY = 200
+
+# 失败退避：同一条 HR 消息连续生成失败 N 次后，M 秒内不再重试
+REPLY_FAILURE_LIMIT = 3
+REPLY_BACKOFF_SECONDS = 1800
+
+
+def extract_unreplied_block(msgs: List[dict]) -> Optional[str]:
+    """提取尾部连续未回复的 HR 消息块（系统通知已过滤）。
+
+    从最后一条消息向前找到最近一条我方消息，其后所有 HR 消息按序合并；
+    没有未回复 HR 消息时返回 None。HR 连发多条时整块作为待回复内容。
+    """
+    hr_block = []
+    for m in reversed(msgs):
+        if m.get("sender") == "me":
+            break
+        content = (m.get("content") or "").strip()
+        if not content or is_system_notification(content):
+            continue
+        hr_block.append(content)
+    if not hr_block:
+        return None
+    return "\n".join(reversed(hr_block))
 
 
 class BossChatMonitor(BossApplier):
@@ -739,6 +764,9 @@ class BossChatMonitor(BossApplier):
                 content = (msg.get("content") or "").strip()
                 if not content:
                     continue
+                # 系统通知不入库，避免污染 AI 上下文
+                if is_system_notification(content):
+                    continue
                 clean_msgs.append({"sender": sender, "content": content, "status": msg.get("status", "")})
 
             if clean_msgs:
@@ -773,36 +801,11 @@ class BossChatMonitor(BossApplier):
                                         log.info(f"[监控] 提取HR微信: {wx_id}")
                                         break
 
-            # 检测需要回复的 HR 消息：仅跳过纯 BOSS 系统通知（<80字且以系统模式开头）
-            def _is_system_notification(content):
-                content = content.strip()
-                if len(content) > 80:
-                    return False
-                patterns = (
-                    "你与该职位竞争者PK情况",
-                    "竞争力分析",
-                    "BOSS安全提示",
-                    "系统消息",
-                    "沟通分析",
-                    "今日推荐",
-                    "该Boss已查看了你的简历",
-                )
-                return any(content.startswith(p) for p in patterns)
-
-            unreplied_hr_msg = None
-            for i in range(len(clean_msgs) - 1, -1, -1):
-                m = clean_msgs[i]
-                if m["sender"] == "me":
-                    continue
-                if _is_system_notification(m["content"]):
-                    continue
-                # HR 消息
-                has_reply_after = any(clean_msgs[j]["sender"] == "me" for j in range(i + 1, len(clean_msgs)))
-                if not has_reply_after:
-                    unreplied_hr_msg = m["content"]
-                    new_count = 1
-                    log.info(f"[监控] 待回复HR消息: {m['content'][:60]}...")
-                break
+            # 提取尾部连续未回复的 HR 消息块（HR 连发多条时整块回复）
+            unreplied_hr_msg = extract_unreplied_block(clean_msgs)
+            if unreplied_hr_msg:
+                new_count = 1
+                log.info(f"[监控] 待回复HR消息: {unreplied_hr_msg[:60]}...")
 
             if unreplied_hr_msg:
                 result["new_messages"] += 1
@@ -812,6 +815,21 @@ class BossChatMonitor(BossApplier):
             if unreplied_hr_msg and auto_reply_enabled:
                 today_replies = get_today_auto_reply_count()
                 if today_replies >= MAX_AUTO_REPLY_PER_DAY:
+                    continue
+
+                # 失败退避：同一条消息连续失败次数超限 → 冷却期内跳过
+                if not hasattr(self, "_reply_failures"):
+                    self._reply_failures = {}
+                fail_key = (conv_id, hash(unreplied_hr_msg))
+                fail_state = self._reply_failures.get(fail_key)
+                if (
+                    fail_state
+                    and fail_state["count"] >= REPLY_FAILURE_LIMIT
+                    and time.time() - fail_state["last_ts"] < REPLY_BACKOFF_SECONDS
+                ):
+                    log.info(
+                        f"[监控] 会话 {matched_conv.get('hr_name')} 该消息连续生成失败 {fail_state['count']} 次，冷却中，本轮跳过"
+                    )
                     continue
 
                 try:
@@ -827,6 +845,29 @@ class BossChatMonitor(BossApplier):
                             job_desc = app.get("description") or ""
                             job_title = job_title or app.get("job_title", "")
                             job_company = job_company or app.get("company", "")
+
+                    # 会话未关联投递记录时，按 HR 名反查回填岗位信息
+                    if not (job_desc and job_title and job_company):
+                        app2 = get_application_by_hr_name(hr_name_to_open) or get_application_by_hr_name(
+                            matched_conv.get("hr_name", "")
+                        )
+                        if app2:
+                            job_desc = job_desc or (app2.get("description") or "")
+                            job_title = job_title or app2.get("job_title", "")
+                            job_company = job_company or app2.get("company", "")
+                            if app2.get("id") and not matched_conv.get("application_id"):
+                                try:
+                                    from backend.state import get_db as _gdb
+
+                                    _gdb().execute(
+                                        "UPDATE conversations SET application_id=? WHERE id=?",
+                                        (app2["id"], conv_id),
+                                    )
+                                    _gdb().commit()
+                                    matched_conv["application_id"] = app2["id"]
+                                    log.info(f"[监控] 会话已关联岗位: {app2.get('job_title')}")
+                                except Exception:
+                                    pass
 
                     job_info = {
                         "title": job_title,
@@ -850,6 +891,21 @@ class BossChatMonitor(BossApplier):
                         conv_id, unreplied_hr_msg, job_info, style, resume, wechat,
                         agent_ctx=agent_ctx
                     )
+
+                    # 回复去重：与我方最后一条消息完全相同则重新生成一次，仍相同则跳过本轮
+                    last_me = next(
+                        (m["content"] for m in reversed(clean_msgs) if m["sender"] == "me"), ""
+                    )
+                    if reply and reply == last_me:
+                        log.info("[监控] 生成的回复与上一条重复，重新生成一次")
+                        reply, interest, extra_data = generate_reply(
+                            conv_id, unreplied_hr_msg, job_info, style, resume, wechat,
+                            agent_ctx=agent_ctx
+                        )
+                        if reply and reply == last_me:
+                            log.warning("[监控] 重新生成后仍与上一条重复，跳过本轮发送")
+                            reply = ""
+
                     if reply:
                         # 发送回复（工具操作已在 Agent 内部完成）
                         log.info(f"[监控] AI回复: {reply[:60]}...")
@@ -858,6 +914,7 @@ class BossChatMonitor(BossApplier):
                             update_conversation_last_message(conv_id, reply, "me", 0)
                             increment_daily_stat("auto_replies_sent")
                             result["replies_sent"] += 1
+                            self._reply_failures.pop(fail_key, None)
                             if interest:
                                 update_conversation_interest(conv_id, interest)
                                 log.info(f"[监控] HR兴趣度: {interest}")
@@ -868,7 +925,20 @@ class BossChatMonitor(BossApplier):
                         else:
                             log.warning("[监控] 回复发送失败!")
                         pause(5, 15)
+                    else:
+                        # 生成失败（空回复）：累计失败次数用于退避
+                        prev = self._reply_failures.get(fail_key, {"count": 0, "last_ts": 0})
+                        prev["count"] += 1
+                        prev["last_ts"] = time.time()
+                        self._reply_failures[fail_key] = prev
+                        log.warning(
+                            f"[监控] 回复生成为空（第{prev['count']}次失败）: {matched_conv.get('hr_name')}"
+                        )
                 except Exception as e:
+                    prev = self._reply_failures.get(fail_key, {"count": 0, "last_ts": 0})
+                    prev["count"] += 1
+                    prev["last_ts"] = time.time()
+                    self._reply_failures[fail_key] = prev
                     log.error(f"AI回复生成失败: {e}", exc_info=True)
             elif unreplied_hr_msg and not auto_reply_enabled:
                 log.info("[监控] 自动回复已关闭，跳过")

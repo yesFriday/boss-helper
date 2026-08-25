@@ -17,7 +17,7 @@ export interface SchedulerConfig {
 
 export interface SchedulerStatus {
   active: boolean
-  phase: 'idle' | 'searching' | 'applying' | 'paused'
+  phase: 'idle' | 'searching' | 'applying' | 'paused' | 'chatting'
   today_count: number
   daily_limit: number
   execution_log: { time: string; tasks: string[] }[]

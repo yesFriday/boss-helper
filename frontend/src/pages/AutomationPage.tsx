@@ -32,6 +32,7 @@ const PHASE_MAP: Record<string, { label: string; color: string; bg: string }> = 
   searching: { label: '搜索中', color: 'text-blue-500', bg: 'bg-blue-500' },
   applying: { label: '投递中', color: 'text-emerald-500', bg: 'bg-emerald-500' },
   paused: { label: '时间外', color: 'text-amber-500', bg: 'bg-amber-500' },
+  chatting: { label: '回复HR中', color: 'text-violet-500', bg: 'bg-violet-500' },
 }
 
 export function AutomationPage() {

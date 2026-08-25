@@ -5,6 +5,7 @@ generate_reply() 内部调用 agent_loop.run_agent()，
 LLM 可以自主决定调用工具（发简历、查排期、约面试等）。
 """
 
+import random
 import re
 import sys
 from pathlib import Path
@@ -86,17 +87,45 @@ def build_reply_context(
     if resume_summary:
         parts.append(f"\n我的简历摘要: {resume_summary}")
 
-    # 聊天记录
+    # 聊天记录（展示到「我最后一条消息」为止，待回复块单独放下面，避免重复）
     msgs = get_all_messages(conversation_id)
     if msgs:
-        parts.append("\n最近的聊天记录:")
-        for m in msgs[-10:]:
-            sender_label = "HR" if m["sender"] == "hr" else "我"
-            parts.append(f"  {sender_label}: {m['content']}")
+        last_me_idx = -1
+        for i, m in enumerate(msgs):
+            if m["sender"] == "me":
+                last_me_idx = i
+        history = msgs[: last_me_idx + 1][-10:]
+        if history:
+            parts.append("\n最近的聊天记录:")
+            for m in history:
+                sender_label = "HR" if m["sender"] == "hr" else "我"
+                parts.append(f"  {sender_label}: {m['content']}")
 
     parts.append(f"\nHR刚刚说: {hr_message}")
 
     return "\n".join(parts)
+
+
+# 简单问候快速回复模板池（不走 LLM）：口语化、不暴露 AI 身份、带变量差异化，
+# 避免"所有 HR 收到同一句开场白"的机器人指纹
+GREETING_TEMPLATES = [
+    "您好，看到贵司在招{title}，正好是我方向的，方便聊聊嘛？",
+    "您好呀，{company}的{title}我还挺感兴趣的，可以详细了解下嘛？",
+    "hi，刷到{company}这个{title}，感觉挺对口的，想了解下~",
+    "您好！{title}这个岗位我看了下，跟我背景挺匹配的，方便沟通一下嘛？",
+    "您好，我这边正在看{title}方向的机会，贵司这个岗位还在招嘛？",
+    "您好呀，看到{title}这个职位，想深入了解一下，方便的话聊聊呗~",
+    "您好，{company}的{title}吸引到我了，方便的话想跟您聊几句。",
+    "嗨，您好！对这个{title}岗位挺感兴趣的，看了下要求也比较对口，可以聊聊嘛？",
+]
+
+
+def _quick_greeting(job_info: dict) -> str:
+    """从模板池随机挑一条，填入岗位/公司变量做差异化。"""
+    title = job_info.get("title") or "这个"
+    company = job_info.get("company") or "贵司"
+    template = random.choice(GREETING_TEMPLATES)
+    return template.format(title=title, company=company)
 
 
 def generate_reply(
@@ -119,21 +148,12 @@ def generate_reply(
     if not hr_message or len(hr_message.strip()) < 1:
         return "", "", {}
 
-    # 简单问候 → 硬编码快速回复，不走 LLM
+    # 简单问候 → 模板池快速回复，不走 LLM
     hr_lower = hr_message.strip().lower()
     if hr_lower in (
         "你好", "您好", "hi", "hello", "嗨", "在吗", "在吗？", "在不在", "在不在？",
     ):
-        company = job_info.get("company", "贵公司")
-        title = job_info.get("title", "相关岗位")
-        desc_hint = ""
-        if job_info.get("description"):
-            desc_hint = "，看了下要求感觉挺对口的"
-        return (
-            f"您好！我对贵司招聘的{title}很感兴趣{desc_hint}，请问方便详细聊聊吗？",
-            "low",
-            {},
-        )
+        return (_quick_greeting(job_info), "low", {})
 
     # ── Agent 模式 ──
     if agent_ctx is not None:

@@ -7,10 +7,13 @@ import json
 import sqlite3
 import threading
 from datetime import date, datetime
-from pathlib import Path
-from typing import Optional, List, Dict, Any
 
-DB_PATH = Path(__file__).parent.parent / ".boss_profile" / "boss_state.db"
+from backend.logger import get_logger
+from backend.path_config import get_boss_data_dir
+
+log = get_logger("state")
+
+DB_PATH = get_boss_data_dir() / "boss_state.db"
 
 _local = threading.local()
 
@@ -127,6 +130,24 @@ def init_db():
         db.execute("ALTER TABLE applications ADD COLUMN hr_active_time TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        db.execute("ALTER TABLE conversations ADD COLUMN summary TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE conversations ADD COLUMN summary_upto_id INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    # 工具事件表：Agent 有副作用的工具调用记录（发简历/换微信/约面试等），供后续轮次上下文回溯
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS tool_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+            tool_name       TEXT NOT NULL,
+            result_summary  TEXT NOT NULL,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
     # 候选池表
     db.executescript("""
         CREATE TABLE IF NOT EXISTS shortlists (
@@ -677,8 +698,20 @@ def replace_conversation_messages(conversation_id: int, messages: List[dict]):
                 )
         new_msgs_to_insert = clean_web_msgs[overlap_len:]
     else:
-        # 无重叠区（例如库为空，或历史记录有断档，直接追加/写入）
-        new_msgs_to_insert = clean_web_msgs
+        # 无重叠区：可能是库为空（正常追加），也可能是滑动窗口失配（渲染差异/过滤规则变化
+        # 导致内容不再逐字相等）。集合去重兜底：跳过 DB 最近 100 条中已存在的 (sender, content)，
+        # 防止整段历史重复追加污染上下文；滑动窗口正常命中时不会走到这里。
+        if db_msgs:
+            recent_keys = {(m["sender"], m["content"]) for m in db_msgs[-100:]}
+            deduped = [m for m in clean_web_msgs if (m["sender"], m["content"]) not in recent_keys]
+            skipped = len(clean_web_msgs) - len(deduped)
+            if skipped:
+                log.warning(
+                    f"[state] 会话{conversation_id} 滑动窗口失配，集合去重跳过 {skipped} 条疑似重复消息"
+                )
+            new_msgs_to_insert = deduped
+        else:
+            new_msgs_to_insert = clean_web_msgs
 
     # 5. 获取已有的 AI 生成回复内容，做标记保留（对新插入的进行识别）
     old_ai = {
@@ -731,6 +764,108 @@ def message_exists(conversation_id: int, content: str, sender: str) -> bool:
         .fetchone()
     )
     return row is not None
+
+
+# ══════════════════════════════════════
+#  工具事件 / 会话摘要 / 岗位回填
+# ══════════════════════════════════════
+
+
+def record_tool_event(conversation_id: int, tool_name: str, result_summary: str):
+    """记录一次有副作用的 Agent 工具调用，供后续轮次上下文回溯。"""
+    if not result_summary:
+        return
+    get_db().execute(
+        "INSERT INTO tool_events (conversation_id, tool_name, result_summary) VALUES (?, ?, ?)",
+        (conversation_id, tool_name, result_summary[:200]),
+    )
+    get_db().commit()
+
+
+def get_recent_tool_events(conversation_id: int, limit: int = 5) -> List[dict]:
+    """最近的工具事件，按时间倒序。"""
+    return _rows_to_list(
+        get_db()
+        .execute(
+            "SELECT tool_name, result_summary, created_at FROM tool_events "
+            "WHERE conversation_id=? ORDER BY id DESC LIMIT ?",
+            (conversation_id, limit),
+        )
+        .fetchall()
+    )
+
+
+def update_conversation_summary(conversation_id: int, summary: str, upto_message_id: int):
+    """写入/滚动更新会话长历史摘要。upto_message_id 表示摘要已覆盖到的消息 id。"""
+    get_db().execute(
+        "UPDATE conversations SET summary=?, summary_upto_id=? WHERE id=?",
+        (summary, upto_message_id, conversation_id),
+    )
+    get_db().commit()
+
+
+def get_conversation_summary(conversation_id: int) -> tuple:
+    """返回 (summary, summary_upto_id)。"""
+    row = get_db().execute(
+        "SELECT summary, summary_upto_id FROM conversations WHERE id=?", (conversation_id,)
+    ).fetchone()
+    if not row:
+        return "", 0
+    return (row["summary"] or ""), (row["summary_upto_id"] or 0)
+
+
+def get_application_by_hr_name(hr_name: str) -> Optional[dict]:
+    """按 HR 名字反查投递记录，回填聊天会话缺失的岗位信息。取最新一条。"""
+    if not hr_name:
+        return None
+    rows = _rows_to_list(
+        get_db()
+        .execute(
+            "SELECT * FROM applications WHERE hr_name=? ORDER BY id DESC LIMIT 1",
+            (hr_name,),
+        )
+        .fetchall()
+    )
+    return rows[0] if rows else None
+
+
+# BOSS 平台系统通知前缀（≤80字且以此开头 → 非HR真实消息，不存库、不进上下文）
+SYSTEM_NOTIFICATION_PREFIXES = (
+    "你与该职位竞争者PK情况",
+    "竞争力分析",
+    "BOSS安全提示",
+    "系统消息",
+    "沟通分析",
+    "今日推荐",
+    "该Boss已查看了你的简历",
+)
+
+
+def is_system_notification(content: str) -> bool:
+    """判断一条消息是否为 BOSS 系统通知（短文本且以已知系统前缀开头）。"""
+    content = (content or "").strip()
+    if len(content) > 80:
+        return False
+    return any(content.startswith(p) for p in SYSTEM_NOTIFICATION_PREFIXES)
+
+
+def purge_system_notifications() -> int:
+    """清理历史存库的系统通知消息（一次性迁移，幂等）。返回删除条数。"""
+    rows = _rows_to_list(
+        get_db()
+        .execute(
+            "SELECT id, content FROM messages WHERE sender='hr' AND length(content) <= 80"
+        )
+        .fetchall()
+    )
+    ids = [r["id"] for r in rows if is_system_notification(r["content"])]
+    if not ids:
+        return 0
+    db = get_db()
+    db.executemany("DELETE FROM messages WHERE id=?", [(i,) for i in ids])
+    db.commit()
+    log.info(f"[state] 已清理 {len(ids)} 条历史系统通知消息")
+    return len(ids)
 
 
 # ══════════════════════════════════════

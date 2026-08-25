@@ -1,0 +1,15 @@
+{
+  "name": "bosshelper-desktop-app",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build:sidecar": "python scripts/build_sidecar.py",
+    "frontend:build": "npm run build --prefix frontend",
+    "frontend:dev": "npm run dev --prefix frontend",
+    "tauri:dev": "npx tauri dev",
+    "tauri:build": "npm run build:sidecar && npm run frontend:build && npx tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

@@ -1,4 +1,4 @@
-const BASE_URL = ''
+const BASE_URL = typeof window !== 'undefined' && location.port !== '8010' ? 'http://127.0.0.1:8010' : ''
 
 class ApiError extends Error {
   status: number

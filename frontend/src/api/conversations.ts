@@ -3,7 +3,7 @@ import type { Conversation, Message } from './types'
 
 export const conversationsApi = {
   listConversations: (filter?: string) =>
-    api.get<{ conversations: Conversation[] }>('/api/conversations', { params: filter ? { filter } : {} }),
+    api.get<{ conversations: Conversation[] }>(filter ? `/api/conversations?filter=${filter}` : '/api/conversations'),
 
   getMessages: (id: number, limit = 100) =>
     api.get<{ messages: Message[] }>(`/api/conversations/${id}/messages?limit=${limit}`),

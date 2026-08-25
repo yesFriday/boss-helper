@@ -14,7 +14,6 @@ BOSS直聘 AI Agent 岗位采集工具
 
 import argparse
 import csv
-import io
 import json
 import os
 import random
@@ -32,8 +31,12 @@ from backend.logger import get_logger
 
 log = get_logger("firefox")
 
-# Windows 编码修复
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# Windows 编码修复（原地重配置，不替换对象——替换会导致测试捕获流被意外关闭）
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 # ── 配置 ──
 TODAY = date.today().isoformat()
@@ -109,9 +112,11 @@ CITIES = {
     "全国": "100010000",
 }
 
+from backend.path_config import get_boss_data_dir
+
 OUTPUT_DIR = Path.home() / "AI" / "岗位日报"
-STATE_FILE = Path(__file__).parent.parent / ".boss_profile" / "firefox_state.json"
-PROFILE_DIR = Path(__file__).parent.parent / ".boss_profile" / "firefox_user_data"
+STATE_FILE = get_boss_data_dir() / "firefox_state.json"
+PROFILE_DIR = get_boss_data_dir() / "firefox_user_data"
 
 ANTI_DETECT = """
 // ── 核心：隐藏 webdriver 标记 ──
