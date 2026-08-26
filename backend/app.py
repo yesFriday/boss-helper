@@ -493,6 +493,12 @@ async def start_automation():
         return {"status": "error", "message": f"浏览器启动失败: {e}"}
 
     if automation is None or automation.page is None:
+        # 半启动状态必须彻底关闭,否则 Playwright 循环残留导致后续启动报 Sync API 错误
+        if automation is not None:
+            try:
+                await _run_pw(automation.close)
+            except Exception:
+                pass
         automation = None
         return {"status": "error", "message": "浏览器启动后页面为空，请重试"}
 

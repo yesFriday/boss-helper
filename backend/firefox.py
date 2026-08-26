@@ -18,6 +18,7 @@ import json
 import os
 import random
 import re
+import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
@@ -30,6 +31,19 @@ from playwright.sync_api import sync_playwright
 from backend.logger import get_logger
 
 log = get_logger("firefox")
+
+# PyInstaller 冻结环境下，Playwright 会在临时解包目录(_MEIxxx)里找浏览器导致
+# "Executable doesn't exist"。强制指向共享安装位置(%LOCALAPPDATA%\ms-playwright)。
+if getattr(sys, "frozen", False):
+    _shared_browsers = Path.home() / "AppData" / "Local" / "ms-playwright"
+    if _shared_browsers.exists():
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_shared_browsers))
+        log.info(f"[冻结模式] 浏览器目录: {_shared_browsers}")
+    else:
+        log.warning(
+            f"[冻结模式] 未找到共享浏览器目录 {_shared_browsers}，"
+            "请先运行 playwright install"
+        )
 
 # Windows 编码修复（原地重配置，不替换对象——替换会导致测试捕获流被意外关闭）
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -386,6 +400,21 @@ class BossScraper:
 
     def start(self):
         self._pw = sync_playwright().start()
+        try:
+            self._start_context()
+        except Exception:
+            # 原子性清理:Playwright 启动后任何失败都必须 stop,否则其内部事件循环
+            # 会留在 pw 线程,导致后续所有启动都报 "Sync API inside the asyncio loop"
+            try:
+                self._pw.stop()
+            except Exception:
+                pass
+            self._pw = None
+            self._ctx = None
+            self.page = None
+            raise
+
+    def _start_context(self):
         PROFILE_DIR.mkdir(parents=True, exist_ok=True)
         kw = {
             "headless": self.headless,
@@ -424,6 +453,24 @@ class BossScraper:
             self._br.close()
         if self._pw:
             self._pw.stop()
+        self._kill_lingering_firefox()
+
+    def _kill_lingering_firefox(self):
+        """close 后 Firefox 若未退净会持有 profile 锁,导致下次启动等锁 2 分钟。
+        给 3 秒优雅退出时间,然后强杀命令行里带本 profile 路径的 firefox 进程。"""
+        time.sleep(3)
+        try:
+            cmd = (
+                "Get-CimInstance Win32_Process -Filter \"Name='firefox.exe'\" | "
+                f"Where-Object {{ $_.CommandLine -like '*{PROFILE_DIR}*' }} | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                capture_output=True, timeout=20,
+            )
+        except Exception:
+            pass
 
     def _body_text(self, limit=1500):
         try:
