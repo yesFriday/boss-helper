@@ -20,6 +20,21 @@ def _record(ctx: dict, tool_name: str, result_summary: str):
         log.debug(f"工具事件记录失败: {e}")
 
 
+def _call_automation(ctx: dict, method_name: str, *args):
+    """调用 automation 的浏览器方法。ctx 提供 run_pw(llm线程场景)时 hop 回 pw 线程,
+    否则直调(CLI/测试场景,调用方本身就在浏览器线程或无浏览器)。"""
+    automation = ctx.get("automation")
+    if not automation:
+        return None
+    method = getattr(automation, method_name, None)
+    if method is None:
+        return None
+    run_pw = ctx.get("run_pw")
+    if run_pw is not None:
+        return run_pw(method, *args)
+    return method(*args)
+
+
 def execute_tool(tool_name: str, tool_args: dict, ctx: dict) -> str:
     """
     根据工具名分发执行，返回给 LLM 的结果字符串。
@@ -65,7 +80,7 @@ def _exec_send_resume(ctx: dict) -> str:
     if not automation:
         return "错误: 浏览器自动化实例不可用"
 
-    success = automation.send_resume()
+    success = _call_automation(ctx, "send_resume")
     if success:
         from backend.state import mark_resume_sent
         mark_resume_sent(conv_id)
@@ -89,7 +104,7 @@ def _exec_share_wechat(ctx: dict) -> str:
     if not automation:
         return "错误: 浏览器自动化实例不可用"
 
-    success = automation.send_wechat(hr_name)
+    success = _call_automation(ctx, "send_wechat", hr_name)
     if success:
         _record(ctx, "share_wechat", "微信名片分享成功")
         return "微信名片已通过BOSS分享。在你的回复中告知HR（注意：回复里不要含有'微信'这两个字，BOSS会过滤）。"
@@ -111,7 +126,7 @@ def _exec_share_phone(ctx: dict) -> str:
     if not automation:
         return "错误: 浏览器自动化实例不可用"
 
-    success = automation.send_phone(hr_name)
+    success = _call_automation(ctx, "send_phone", hr_name)
     if success:
         from backend.state import mark_phone_shared
         mark_phone_shared(conv_id)

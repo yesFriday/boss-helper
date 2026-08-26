@@ -155,12 +155,12 @@ export function SearchPage() {
       />
 
       {searchStatusMessage && (
-        <div className="mb-4 p-3 bg-white rounded-lg border border-slate-200 text-sm flex items-center justify-between">
+        <div className="mb-4 p-3 bg-white rounded-xl border border-slate-200 text-sm flex items-center justify-between">
           <div dangerouslySetInnerHTML={{ __html: searchStatusMessage }} />
           {searchInFlight && (
             <button
               onClick={handleCancelSearch}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 transition-colors cursor-pointer"
             >
               <Square size={12} />
               停止搜索
@@ -187,7 +187,7 @@ export function SearchPage() {
         </div>
       ) : (
         <EmptyState
-          icon={<Search size={48} />}
+          icon={<Search size={48} className="text-slate-300" />}
           title="点击搜索获取岗位"
           description="输入关键词和城市，开始搜索工作机会"
         />

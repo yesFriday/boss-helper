@@ -8,14 +8,14 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 export const Card = forwardRef<HTMLDivElement, CardProps>(
-  ({ hoverable = true, padded = true, className, children, ...props }, ref) => {
+  ({ hoverable = false, padded = true, className, children, ...props }, ref) => {
     return (
       <div
         ref={ref}
         className={cn(
-          'rounded-2xl bg-white/80 backdrop-blur-sm border border-gray-100 shadow-sm',
-          'transition-all duration-300 ease-out',
-          hoverable && 'hover:shadow-md hover:-translate-y-0.5 hover:border-gray-200',
+          'rounded-xl bg-white border border-slate-200',
+          'transition-shadow duration-150 ease-out',
+          hoverable && 'hover:shadow-sm',
           padded && 'p-5',
           className,
         )}

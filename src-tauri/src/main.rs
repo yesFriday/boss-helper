@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    bosshelper_desktop_lib::run();
+    bosshelper_desktop::run();
 }

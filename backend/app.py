@@ -12,7 +12,6 @@ import random
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, List
 from urllib.parse import urljoin
@@ -146,7 +145,7 @@ def _build_scheduler_deps() -> SchedulerDeps:
         set_monitor_paused=_set_monitor_paused,
         get_monitor_paused=lambda: monitor_paused,
         monitor_alive=lambda: monitor_task is not None and not monitor_task.done(),
-        run_chat_cycle=lambda: _run_pw(automation.run_chat_monitor_cycle),
+        run_chat_cycle=lambda: automation.run_chat_monitor_cycle(),
     )
 
 
@@ -195,9 +194,9 @@ async def on_startup():
     scheduler = Scheduler(_build_scheduler_deps())
     scheduler_task = asyncio.create_task(scheduler.run())
 
-
-# Playwright 同步 API 要求所有操作在同一线程 —— 用单线程池保证
-_playwright_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
+# Playwright 同步 API 要求所有操作在同一线程 —— 单线程池收敛在 runtime 模块,
+# 监控的 LLM 生成阶段走 runtime.llm_executor,浏览器线程期间空闲供前端手动操作使用
+from backend.runtime import pw_executor as _playwright_executor  # noqa: E402
 
 
 async def _run_pw(fn, *args):
@@ -1291,7 +1290,7 @@ async def chat_monitor_loop():
     if automation and not monitor_paused:
         log.info("[监控] 执行首次会话扫描...")
         try:
-            result = await _run_pw(automation.run_chat_monitor_cycle)
+            result = await automation.run_chat_monitor_cycle()
             if result.get("new_messages", 0) > 0:
                 await broadcast_ws({"type": "new_messages", "summary": result})
             if result.get("replies_sent", 0) > 0:
@@ -1344,7 +1343,7 @@ async def chat_monitor_loop():
             if get_setting("auto_reply_enabled", "true") != "true":
                 continue
 
-            result = await _run_pw(automation.run_chat_monitor_cycle)
+            result = await automation.run_chat_monitor_cycle()
 
             if result.get("new_messages", 0) > 0:
                 await broadcast_ws(

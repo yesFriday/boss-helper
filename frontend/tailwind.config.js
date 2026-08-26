@@ -3,13 +3,6 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
-      colors: {
-        accent: {
-          DEFAULT: '#6366f1',
-          light: '#818cf8',
-          dark: '#4f46e5',
-        },
-      },
       width: {
         70: '17.5rem',
       },
@@ -17,12 +10,12 @@ export default {
         3: '3px',
       },
       animation: {
-        'slide-in': 'slideIn 0.3s ease',
-        'fade-in': 'fadeIn 0.2s ease',
+        'slide-in': 'slideIn 0.25s ease',
+        'fade-in': 'fadeIn 0.15s ease',
       },
       keyframes: {
         slideIn: {
-          from: { transform: 'translateY(10px)', opacity: '0' },
+          from: { transform: 'translateY(8px)', opacity: '0' },
           to: { transform: 'translateY(0)', opacity: '1' },
         },
         fadeIn: {

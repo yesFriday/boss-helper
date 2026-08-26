@@ -5,6 +5,7 @@ BossChatMonitor — 专门负责聊天会话同步、AI 回复决策和消息发
 
 import json
 import random
+import asyncio
 import re
 import time
 from typing import List, Optional
@@ -17,6 +18,9 @@ from backend.state import (
     list_active_conversations,
     get_or_create_conversation,
     get_conversation,
+    get_conversation_by_security_id,
+    update_conversation_security_id,
+    get_stale_hr_conversations,
     replace_conversation_messages,
     update_conversation_last_message,
     update_conversation_wechat,
@@ -29,6 +33,7 @@ from backend.state import (
     increment_daily_stat,
     update_conversation_interest,
 )
+from backend import runtime
 
 log = get_logger("boss_chat_monitor")
 
@@ -37,6 +42,9 @@ MAX_AUTO_REPLY_PER_DAY = 200
 # 失败退避：同一条 HR 消息连续生成失败 N 次后，M 秒内不再重试
 REPLY_FAILURE_LIMIT = 3
 REPLY_BACKOFF_SECONDS = 1800
+
+# 孤儿消息兜底扫描：HR 最后一条消息超过 N 分钟未回复的会话从 DB 侧找回
+SWEEP_LIMIT_PER_CYCLE = 2
 
 
 def extract_unreplied_block(msgs: List[dict]) -> Optional[str]:
@@ -56,6 +64,31 @@ def extract_unreplied_block(msgs: List[dict]) -> Optional[str]:
     if not hr_block:
         return None
     return "\n".join(reversed(hr_block))
+
+
+def match_conversation_item(item: dict, known_convs: List[dict]) -> Optional[dict]:
+    """把页面会话条目匹配到 DB 会话。securityId 精确优先,其次名字精确,最后名字子串。
+
+    securityId 是 BOSS 会话的唯一身份,名字撞车不再归并(同名不同 HR 拆分会话)。
+    """
+    sid = (item.get("security_id") or "").strip()
+    if sid:
+        for kc in known_convs:
+            if (kc.get("security_id") or "").strip() == sid:
+                return kc
+    extracted_name = (item.get("hr_name") or "").strip()
+    text = item.get("text", "")
+    if extracted_name:
+        for kc in known_convs:
+            kc_name = kc.get("hr_name", "")
+            if kc_name and kc_name == extracted_name and not (sid and (kc.get("security_id") or "").strip()):
+                # 条目带 sid 而已知会话没有 sid 且名字相同 → 命中(老数据,后续回填)
+                return kc
+    for kc in known_convs:
+        kc_name = kc.get("hr_name", "")
+        if kc_name and len(kc_name) >= 3 and kc_name in text:
+            return kc
+    return None
 
 
 class BossChatMonitor(BossApplier):
@@ -159,7 +192,59 @@ class BossChatMonitor(BossApplier):
             except Exception:
                 pass
 
+        return self._attach_security_ids(conversations)
+
+    def _attach_security_ids(self, conversations: List[dict]) -> List[dict]:
+        """给会话条目附加 securityId(BOSS 会话唯一身份)。
+
+        每轮只调一次 friends API 建 name→securityId 映射(比原来 send_wechat 时
+        每会话最多 3 次重试的调用频率更低);失败静默退化,不影响原有流程。
+        """
+        if not conversations:
+            return conversations
+        try:
+            sid_map = self._fetch_friend_sid_map()
+            if not sid_map:
+                return conversations
+            attached = 0
+            for c in conversations:
+                name = (c.get("hr_name") or "").strip()
+                if name and name in sid_map:
+                    c["security_id"] = sid_map[name]
+                    attached += 1
+            if attached:
+                log.debug(f"[监控] securityId 映射: {attached}/{len(conversations)} 个会话条目附加成功")
+        except Exception as e:
+            log.debug(f"[监控] securityId 映射获取失败(退化用名字匹配): {e}")
         return conversations
+
+    def _fetch_friend_sid_map(self) -> dict:
+        """调 BOSS friends API 拿 name→securityId 映射。失败返回空 dict。"""
+        try:
+            encrypt_id = self.page.evaluate("""() => {
+                for (const key of Object.keys(window)) {
+                    try { if (window[key] && window[key].encryptSystemId) return window[key].encryptSystemId; } catch(e) {}
+                }
+                return '';
+            }""")
+            if not encrypt_id:
+                return {}
+            url = f"https://www.zhipin.com/wapi/zprelation/friend/geekFilterByLabel?labelId=0&encryptSystemId={encrypt_id}"
+            data = self.page.evaluate(
+                """async (url) => {
+                    const r = await fetch(url, {headers:{'Accept':'application/json','x-requested-with':'XMLHttpRequest'}, credentials:'include'});
+                    return await r.json();
+                }""",
+                url,
+            )
+            friends = (data or {}).get("zpData", {}).get("friends", []) or []
+            return {
+                ((f.get("bossName") or f.get("realName") or "").strip()): f.get("securityId", "")
+                for f in friends
+                if (f.get("bossName") or f.get("realName") or "").strip() and f.get("securityId")
+            }
+        except Exception:
+            return {}
 
     def read_visible_messages(self) -> List[dict]:
         """读取当前右侧聊天窗口中的可见消息，避免把左侧会话列表误当聊天内容。"""
@@ -563,86 +648,152 @@ class BossChatMonitor(BossApplier):
     #  监控周期（供后台循环调用）
     # ══════════════════════════════════════
 
-    def run_chat_monitor_cycle(self) -> dict:
-        """
-        一个完整的监控周期:
-        1. 导航到聊天页
-        2. 扫描未读会话
-        3. 对每个未读会话: 打开→读消息→存库→AI回复
-        """
-        result = {"checked": 0, "new_messages": 0, "replies_sent": 0}
+    def _click_unread_tab(self):
+        """轻量点击「未读」Tab,刷新侧边栏列表(不整页刷新,避免触发登录检查)。"""
+        for sel in ['span.label-name:has-text("未读")', '.label-name:has-text("未读")']:
+            try:
+                tab = self.page.locator(sel).first
+                if tab.is_visible():
+                    tab.click()
+                    pause(0.5, 1)
+                    break
+            except Exception:
+                pass
 
+    def _scan_list(self) -> Optional[List[dict]]:
+        """[pw线程] 导航+安全检查+扫描未读列表+孤儿sweep合并。失败返回 None。"""
         # 只在不在聊天页时才导航（避免每轮刷新页面，触发 BOSS 登录检查）
         current_url = self.page.url
-        need_nav = "/web/geek/chat" not in current_url
-        if need_nav:
+        if "/web/geek/chat" not in current_url:
             if not self.navigate_to_chat():
                 log.info("[监控] 导航到聊天页失败")
-                return result
+                return None
         else:
-            # 已在聊天页，轻量点击「未读」Tab 即可
-            for sel in ['span.label-name:has-text("未读")', '.label-name:has-text("未读")']:
-                try:
-                    tab = self.page.locator(sel).first
-                    if tab.is_visible():
-                        tab.click()
-                        pause(0.5, 1)
-                        break
-                except Exception:
-                    pass
+            self._click_unread_tab()
 
         if not self.check_page_safety():
             log.warning("[监控] 安全检查未通过（登录过期/验证码等）")
-            return result
+            return None
 
         conversations = self.poll_conversation_list()
-        result["checked"] = len(conversations)
         log.info(f"[监控] 扫描到 {len(conversations)} 个会话")
-        # 始终打印 body 内容用于调试
         try:
             preview = (self.page.inner_text("body") or "")[:800].replace("\n", " | ")
             log.debug(f"[监控] Body: {preview}")
         except Exception:
             pass
 
-        known_convs = list_active_conversations()
-        log.info(f"[监控] 数据库已知活跃会话: {len(known_convs)}")
-
-        # 已在导航时切到「未读」Tab，当前列表都是未读。每轮上限 3 个
         if not conversations:
-            log.info("[监控] 无未读消息，跳过本轮")
-            return result
+            log.info("[监控] 无未读消息")
         if len(conversations) > 3:
             log.info(f"[监控] 未读会话: {len(conversations)} 个，本轮只处理前3个")
             conversations = conversations[:3]
 
-        for conv_data in conversations:
-            text = conv_data.get("text", "")
-            has_unread = conv_data.get("has_unread", False)
-            element = conv_data.get("element")
+        # 孤儿消息兜底(D2):未读红点被打开即消失,回复失败的消息"已读未回"永不再试;
+        # 从 DB 侧找回 HR 最后消息超时未回的会话,与未读条目合并处理
+        items = list(conversations)
+        try:
+            sweep_min = int(get_setting("sweep_after_minutes", "10"))
+            stale = get_stale_hr_conversations(sweep_min, SWEEP_LIMIT_PER_CYCLE)
+            for sc in stale:
+                items.append(
+                    {
+                        "text": sc.get("hr_name", ""),
+                        "hr_name": sc.get("hr_name", ""),
+                        "has_unread": False,
+                        "element": None,
+                        "security_id": sc.get("security_id") or "",
+                        "stale_conv": sc,
+                    }
+                )
+            if stale:
+                log.info(
+                    f"[监控] 孤儿扫描: 找回 {len(stale)} 个超时未回会话: "
+                    f"{[s.get('hr_name') for s in stale]}"
+                )
+        except Exception as e:
+            log.debug(f"[监控] 孤儿扫描失败: {e}")
+        return items
 
-            if not text:
+    async def run_chat_monitor_cycle(self) -> dict:
+        """
+        一个完整的监控周期(三阶段编排,LLM 不占浏览器线程):
+        [pw]  _scan_list     — 导航/安全检查/扫列表/孤儿sweep合并
+        [pw]  _open_and_read — 逐会话: 打开+身份校验+读DOM+存库+提块(纯 DOM/DB)
+        [llm] _generate_one  — 生成回复(快速问候/Agent/降级)+退避/去重闸门(无浏览器,
+                               Agent 工具经 run_pw hop 回 pw 线程)
+        [pw]  _send_one      — 重新定位会话+发送+落库+统计(发送失败计退避)
+        """
+        # monitor 循环与定时调度器可能同时触发(调度块间聊天兜底),串行化避免
+        # 同一会话被两个周期并发处理导致重复回复
+        if not hasattr(self, "_cycle_lock"):
+            self._cycle_lock = asyncio.Lock()
+        async with self._cycle_lock:
+            return await self._run_cycle_locked()
+
+    async def _run_cycle_locked(self) -> dict:
+        result = {"checked": 0, "new_messages": 0, "replies_sent": 0}
+        items = await runtime.aio_run_pw(self._scan_list)
+        if items is None:
+            return result
+        result["checked"] = len(items)
+
+        handled = set()
+        for item in items:
+            task = await runtime.aio_run_pw(self._open_and_read, item, handled, result)
+            if task is None or not task.get("hr_message"):
                 continue
+            result["new_messages"] += 1
+            task = await runtime.aio_run_llm(self._generate_one, task)
+            if task.get("reply"):
+                await runtime.aio_run_pw(self._send_one, task, result)
 
-            # 尝试匹配已知会话：用提取的 HR 名字精确匹配
-            matched_conv = None
-            extracted_name = conv_data.get("hr_name", "")
-            for kc in known_convs:
-                kc_name = kc.get("hr_name", "")
-                if kc_name and extracted_name and kc_name == extracted_name:
-                    matched_conv = kc
-                    break
+        # 收尾:清输入框残留 + 刷新未读Tab,为下一轮做准备
+        await runtime.aio_run_pw(self._refresh_after_cycle)
+        log.info(f"[监控] 本轮完成: 消息 {result['new_messages']}, 回复 {result['replies_sent']}")
+        return result
 
-            if not matched_conv:
-                for kc in known_convs:
-                    kc_name = kc.get("hr_name", "")
-                    if kc_name and len(kc_name) >= 3 and kc_name in text:
-                        matched_conv = kc
-                        break
+    def _refresh_after_cycle(self):
+        self._clear_input_box()
+        self._click_unread_tab()
+        pause(0.5, 1)
 
-            if not matched_conv:
+    def _clear_input_box(self):
+        """清空输入框残留文字,避免污染下一个会话。"""
+        try:
+            input_el = self.page.locator("#chat-input").first
+            text = input_el.inner_text().strip()
+            if text:
+                log.debug(f"[监控] 输入框残留文字「{text[:30]}...」，正在清空")
+                input_el.click()
+                self.page.keyboard.press("Control+a")
+                self.page.keyboard.press("Backspace")
+                pause(0.3, 0.5)
+        except Exception:
+            pass
+
+    def _open_and_read(self, item: dict, handled: set, result: dict) -> Optional[dict]:
+        """[pw线程] 定位/创建会话 → 门卫检查 → 打开+身份校验 → 读消息存库 → 提待回复块。"""
+        text = item.get("text", "")
+        stale_conv = item.get("stale_conv")
+        if not text and not stale_conv:
+            return None
+
+        known_convs = list_active_conversations()
+        log.debug(f"[监控] 数据库已知活跃会话: {len(known_convs)}")
+
+        # ── 定位/创建会话记录 ──
+        if stale_conv:
+            # 孤儿扫描找回的会话,DB 记录已知,跳过匹配
+            conv_id = stale_conv["id"]
+            if conv_id in handled:
+                return None
+            matched_conv = get_conversation(conv_id) or stale_conv
+        else:
+            matched_conv = match_conversation_item(item, known_convs)
+            if matched_conv is None:
                 lines = [l.strip() for l in text.split("\n") if l.strip()]
-                hr_name = conv_data.get("hr_name", "") or lines[0] if lines else ""
+                hr_name = item.get("hr_name", "") or lines[0] if lines else ""
                 hr_name = hr_name[:20] if len(hr_name) > 20 else hr_name
 
                 # 过滤无效名称
@@ -682,290 +833,345 @@ class BossChatMonitor(BossApplier):
                 )
                 if not is_valid:
                     log.debug(f"[监控] 跳过无效会话名: '{hr_name}' (原文: {text[:50]})")
-                    continue
+                    return None
 
                 conv_id = get_or_create_conversation(
-                    None, hr_name, conv_data.get("company", ""), conv_data.get("job_title", "")
+                    None,
+                    hr_name,
+                    item.get("company", ""),
+                    item.get("job_title", ""),
+                    item.get("security_id", ""),
                 )
-                known_convs = list_active_conversations()
                 matched_conv = get_conversation(conv_id)
                 if not matched_conv:
-                    continue
+                    return None
                 log.info(f"[监控] 新建会话: {hr_name}")
                 # 标记用于 WebSocket 广播
                 result.setdefault("new_conversations", []).append(hr_name)
             else:
                 conv_id = matched_conv["id"]
-                # 提取的名字比 DB 更精确时自动修正
-                if extracted_name and len(extracted_name) >= 2:
+                # 提取的名字比 DB 更精确时自动修正(仅无 securityId 的名字匹配路径;
+                # sid 命中的会话身份已确定,不再用名字启发式改名)
+                extracted_name = (item.get("hr_name") or "").strip()
+                if extracted_name and len(extracted_name) >= 2 and not (
+                    item.get("security_id") and matched_conv.get("security_id")
+                ):
                     old_name = matched_conv.get("hr_name", "")
                     if old_name != extracted_name and (
-                        old_name in extracted_name or extracted_name in old_name or len(extracted_name) < len(old_name)
+                        old_name in extracted_name
+                        or extracted_name in old_name
+                        or len(extracted_name) < len(old_name)
                     ):
                         try:
                             from backend.state import get_db as _gdb2
 
-                            _gdb2().execute("UPDATE conversations SET hr_name=? WHERE id=?", (extracted_name, conv_id))
+                            _gdb2().execute(
+                                "UPDATE conversations SET hr_name=? WHERE id=?", (extracted_name, conv_id)
+                            )
                             _gdb2().commit()
                             matched_conv["hr_name"] = extracted_name
                         except Exception:
                             pass
 
-            # 从会话文本里提取公司名（格式：HR名+公司名+岗位）
-            if not matched_conv.get("hr_company"):
-                company_info = text.split("\n")[0] if "\n" in text else text
-                import re as _re3
+        if conv_id in handled:
+            return None
+        handled.add(conv_id)
 
-                hr_name_part = matched_conv.get("hr_name", "")
-                if hr_name_part and len(hr_name_part) >= 2:
-                    company_info = company_info.replace(hr_name_part, "", 1)
-                # 去掉时间/状态/括号等
-                company_info = _re3.sub(r"\d{1,2}:\d{2}|\[.*?\]|送达|已读|未读", "", company_info)
-                # 提取公司名（纯中文 4-12字）
-                m = _re3.search(r"[\u4e00-\u9fa5]{4,12}", company_info)
-                if m:
-                    company = m.group()
+        # 从会话文本里提取公司名（格式：HR名+公司名+岗位）
+        if not matched_conv.get("hr_company"):
+            company_info = text.split("\n")[0] if "\n" in text else text
+            import re as _re3
+
+            hr_name_part = matched_conv.get("hr_name", "")
+            if hr_name_part and len(hr_name_part) >= 2:
+                company_info = company_info.replace(hr_name_part, "", 1)
+            # 去掉时间/状态/括号等
+            company_info = _re3.sub(r"\d{1,2}:\d{2}|\[.*?\]|送达|已读|未读", "", company_info)
+            # 提取公司名（纯中文 4-12字）
+            m = _re3.search(r"[\u4e00-\u9fa5]{4,12}", company_info)
+            if m:
+                company = m.group()
+                try:
+                    from backend.state import get_db as _gdb3
+
+                    _gdb3().execute("UPDATE conversations SET hr_company=? WHERE id=?", (company, conv_id))
+                    _gdb3().commit()
+                    matched_conv["hr_company"] = company
+                    log.info(f"[监控] 提取公司名: {company}")
+                except Exception:
+                    pass
+
+        if matched_conv.get("status") != "active":
+            return None
+        if not matched_conv.get("auto_reply_enabled"):
+            return None
+        if matched_conv.get("is_dangerous"):
+            log.info(f"[监控] 会话 {matched_conv.get('hr_name')} 已标记为风险会话，跳过")
+            return None
+
+        # ── 打开会话 ──
+        hr_name_to_open = matched_conv["hr_name"]
+        opened = self.open_conversation_by_name(hr_name_to_open)
+        if not opened and len(hr_name_to_open) > 4:
+            short = re.match(r"^[\u4e00-\u9fff]{2,3}", hr_name_to_open)
+            if short:
+                opened = self.open_conversation_by_name(short.group(0))
+        if not opened:
+            log.info(f"[监控] 无法打开会话: {hr_name_to_open}")
+            return None
+        pause(1, 2)
+
+        # ── 身份校验(D1 安全网):当前页面 securityId 必须与期望一致 ──
+        # 期望 sid:条目携带的(来自 friends API)优先,退回 DB 记录的
+        expected_sid = (item.get("security_id") or "").strip() or (
+            matched_conv.get("security_id") or ""
+        ).strip()
+        if expected_sid:
+            page_sid = self._get_chat_security_id(hr_name_to_open)
+            if page_sid and page_sid != expected_sid:
+                log.warning(
+                    f"[监控] ⚠️ 身份校验失败: 期望会话 {hr_name_to_open}"
+                    f"(sid={expected_sid[:10]}...) 实际打开 sid={page_sid[:10]}...，"
+                    "跳过回复防止回错人"
+                )
+                return None
+            if page_sid:
+                log.debug(f"[监控] 身份校验通过: {hr_name_to_open}")
+        else:
+            # 存量会话首次带 sid 打开 → 学习回填,后续轮次可精确校验
+            page_sid = self._get_chat_security_id(hr_name_to_open)
+            if page_sid:
+                update_conversation_security_id(conv_id, page_sid)
+                matched_conv["security_id"] = page_sid
+                log.debug(f"[监控] 学习会话 securityId: {hr_name_to_open} -> {page_sid[:10]}...")
+
+        # ── 读取消息 ──
+        msgs = self.read_visible_messages()
+        log.info(f"[监控] 会话 {matched_conv.get('hr_name')}: 读到 {len(msgs)} 条消息")
+
+        clean_msgs = []
+        for msg in msgs:
+            sender = msg.get("sender", "hr")
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+            # 系统通知不入库，避免污染 AI 上下文
+            if is_system_notification(content):
+                continue
+            clean_msgs.append({"sender": sender, "content": content, "status": msg.get("status", "")})
+
+        if clean_msgs:
+            replace_conversation_messages(conv_id, clean_msgs)
+            last_msg = clean_msgs[-1]
+            update_conversation_last_message(conv_id, last_msg["content"], last_msg["sender"], 0)
+
+            # 从 HR 消息里提取微信号
+            if not matched_conv.get("hr_wechat"):
+                import re as _re
+
+                for m in clean_msgs:
+                    if m["sender"] == "hr":
+                        patterns = [
+                            # wxid_xxxxxxxx 格式
+                            r"(?:wxid|WXID)[_\-]?\s*[:：]?\s*([a-zA-Z0-9_-]{6,30})",
+                            # 微信/VX/WeChat：xxx 格式
+                            r"(?:微信|VX|vx|wechat|WeChat)[号：:]*\s*[:：]?\s*([a-zA-Z0-9_-]{4,30})",
+                            # 加我/加V -> xxx
+                            r"(?:加我|加V|找V|加个V)\s*[:：]?\s*([a-zA-Z0-9_-]{4,30})",
+                            # 微信号 xxx（纯中文前缀）
+                            r"\u5fae\u4fe1\u53f7\s+([a-zA-Z0-9_-]{4,30})",
+                        ]
+                        for pat in patterns:
+                            match = _re.search(pat, m["content"])
+                            if match:
+                                wx_id = match.group(1).strip()
+                                if wx_id and len(wx_id) >= 5:
+                                    update_conversation_wechat(conv_id, wx_id)
+                                    matched_conv["hr_wechat"] = wx_id
+                                    result["wechat_exchanged"] = True
+                                    log.info(f"[监控] 提取HR微信: {wx_id}")
+                                    break
+
+        # ── 提取待回复块 + 岗位信息,组装任务(不做任何 LLM 调用) ──
+        unreplied_hr_msg = extract_unreplied_block(clean_msgs)
+        if unreplied_hr_msg:
+            log.info(f"[监控] 待回复HR消息: {unreplied_hr_msg[:60]}...")
+
+        last_me = next((m["content"] for m in reversed(clean_msgs) if m["sender"] == "me"), "")
+        job_info = self._resolve_job_info(matched_conv, conv_id, hr_name_to_open)
+
+        return {
+            "conv_id": conv_id,
+            "matched_conv": matched_conv,
+            "hr_name": hr_name_to_open,
+            "hr_message": unreplied_hr_msg,
+            "job_info": job_info,
+            "last_me": last_me,
+        }
+
+    def _resolve_job_info(self, matched_conv: dict, conv_id: int, hr_name: str) -> dict:
+        """解析岗位信息:会话关联的投递记录优先,无关联时按 HR 名反查回填。"""
+        job_title = matched_conv.get("job_title", "")
+        job_company = matched_conv.get("hr_company", "")
+        job_desc = ""
+        app_id = matched_conv.get("application_id")
+        if app_id:
+            app = get_application(app_id)
+            if app:
+                job_desc = app.get("description") or ""
+                job_title = job_title or app.get("job_title", "")
+                job_company = job_company or app.get("company", "")
+
+        # 会话未关联投递记录时，按 HR 名反查回填岗位信息
+        if not (job_desc and job_title and job_company):
+            app2 = get_application_by_hr_name(hr_name) or get_application_by_hr_name(
+                matched_conv.get("hr_name", "")
+            )
+            if app2:
+                job_desc = job_desc or (app2.get("description") or "")
+                job_title = job_title or app2.get("job_title", "")
+                job_company = job_company or app2.get("company", "")
+                if app2.get("id") and not matched_conv.get("application_id"):
                     try:
-                        from backend.state import get_db as _gdb3
+                        from backend.state import get_db as _gdb
 
-                        _gdb3().execute("UPDATE conversations SET hr_company=? WHERE id=?", (company, conv_id))
-                        _gdb3().commit()
-                        matched_conv["hr_company"] = company
-                        log.info(f"[监控] 提取公司名: {company}")
+                        _gdb().execute(
+                            "UPDATE conversations SET application_id=? WHERE id=?",
+                            (app2["id"], conv_id),
+                        )
+                        _gdb().commit()
+                        matched_conv["application_id"] = app2["id"]
+                        log.info(f"[监控] 会话已关联岗位: {app2.get('job_title')}")
                     except Exception:
                         pass
 
-            if matched_conv.get("status") != "active":
-                continue
-            if not matched_conv.get("auto_reply_enabled"):
-                continue
-            if matched_conv.get("is_dangerous"):
-                log.info(f"[监控] 会话 {matched_conv.get('hr_name')} 已标记为风险会话，跳过")
-                continue
+        return {"title": job_title, "company": job_company, "description": job_desc}
 
-            # 读取消息：打开会话从 DOM 提取
-            hr_name_to_open = matched_conv["hr_name"]
-            opened = self.open_conversation_by_name(hr_name_to_open)
-            if not opened and len(hr_name_to_open) > 4:
-                short = re.match(r"^[\u4e00-\u9fff]{2,3}", hr_name_to_open)
+    def _bump_failure(self, fail_key):
+        """失败计数(生成失败/发送失败共用),触发退避冷却。"""
+        if not hasattr(self, "_reply_failures"):
+            self._reply_failures = {}
+        prev = self._reply_failures.get(fail_key, {"count": 0, "last_ts": 0})
+        prev["count"] += 1
+        prev["last_ts"] = time.time()
+        self._reply_failures[fail_key] = prev
+        return prev
+
+    def _generate_one(self, task: dict) -> dict:
+        """[llm线程] 生成回复:快速问候/Agent/降级三路 + 退避/去重闸门。不碰浏览器,
+        Agent 工具经 ctx["run_pw"] hop 回 pw 线程。"""
+        task["reply"] = ""
+        task["interest"] = ""
+        conv_id = task["conv_id"]
+        matched_conv = task["matched_conv"]
+        hr_message = task.get("hr_message") or ""
+
+        if not hr_message:
+            return task
+        if get_setting("auto_reply_enabled", "true") != "true":
+            log.info("[监控] 自动回复已关闭，跳过")
+            return task
+        if get_today_auto_reply_count() >= MAX_AUTO_REPLY_PER_DAY:
+            log.info(f"[监控] 今日自动回复已达上限 {MAX_AUTO_REPLY_PER_DAY}，跳过")
+            return task
+
+        # 失败退避：同一条消息连续失败次数超限 → 冷却期内跳过
+        if not hasattr(self, "_reply_failures"):
+            self._reply_failures = {}
+        fail_key = (conv_id, hash(hr_message))
+        fail_state = self._reply_failures.get(fail_key)
+        if (
+            fail_state
+            and fail_state["count"] >= REPLY_FAILURE_LIMIT
+            and time.time() - fail_state["last_ts"] < REPLY_BACKOFF_SECONDS
+        ):
+            log.info(
+                f"[监控] 会话 {matched_conv.get('hr_name')} 该消息连续失败 {fail_state['count']} 次，"
+                "冷却中，本轮跳过"
+            )
+            return task
+
+        try:
+            from backend.replier import generate_reply
+
+            job_info = task["job_info"]
+            style = get_setting("ai_reply_style", "professional")
+            resume = get_setting("resume_summary", "")
+            wechat = get_setting("wechat_id", "")
+
+            # 构建 Agent 上下文（工具调用在 Agent 循环内部完成;
+            # run_pw: llm 线程内浏览器操作 hop 回 pw 线程）
+            agent_ctx = {
+                "automation": self,
+                "run_pw": runtime.run_in_pw,
+                "conversation_id": conv_id,
+                "matched_conv": matched_conv,
+                "hr_name": task["hr_name"],
+                "job_info": job_info,
+            }
+
+            reply, interest, _extra = generate_reply(
+                conv_id, hr_message, job_info, style, resume, wechat, agent_ctx=agent_ctx
+            )
+
+            # 回复去重：与我方最后一条消息完全相同则重新生成一次，仍相同则跳过本轮
+            last_me = task.get("last_me", "")
+            if reply and reply == last_me:
+                log.info("[监控] 生成的回复与上一条重复，重新生成一次")
+                reply, interest, _extra = generate_reply(
+                    conv_id, hr_message, job_info, style, resume, wechat, agent_ctx=agent_ctx
+                )
+                if reply and reply == last_me:
+                    log.warning("[监控] 重新生成后仍与上一条重复，跳过本轮发送")
+                    reply = ""
+
+            if reply:
+                task["reply"] = reply
+                task["interest"] = interest or ""
+            else:
+                prev = self._bump_failure(fail_key)
+                log.warning(
+                    f"[监控] 回复生成为空（第{prev['count']}次失败）: {matched_conv.get('hr_name')}"
+                )
+        except Exception as e:
+            self._bump_failure(fail_key)
+            log.error(f"AI回复生成失败: {e}", exc_info=True)
+        return task
+
+    def _send_one(self, task: dict, result: dict):
+        """[pw线程] 重新定位会话(生成期间页面可能被手动操作/调度器导航) → 发送 → 落库 → 统计。"""
+        conv_id = task["conv_id"]
+        matched_conv = task["matched_conv"]
+        reply = task["reply"]
+        hr_name = task["hr_name"]
+        fail_key = (conv_id, hash(task.get("hr_message") or ""))
+
+        # 重新定位会话再发送
+        if not self.open_conversation_by_name(hr_name):
+            if len(hr_name) > 4:
+                short = re.match(r"^[\u4e00-\u9fff]{2,3}", hr_name)
                 if short:
-                    opened = self.open_conversation_by_name(short.group(0))
-            if not opened:
-                log.info(f"[监控] 无法打开会话: {hr_name_to_open}")
-                continue
-            pause(1, 2)
-            msgs = self.read_visible_messages()
-            log.info(f"[监控] 会话 {matched_conv.get('hr_name')}: 读到 {len(msgs)} 条消息")
+                    self.open_conversation_by_name(short.group(0))
 
-            new_count = 0
-            clean_msgs = []
-            for msg in msgs:
-                sender = msg.get("sender", "hr")
-                content = (msg.get("content") or "").strip()
-                if not content:
-                    continue
-                # 系统通知不入库，避免污染 AI 上下文
-                if is_system_notification(content):
-                    continue
-                clean_msgs.append({"sender": sender, "content": content, "status": msg.get("status", "")})
+        log.info(f"[监控] AI回复: {reply[:60]}...")
+        if self.send_message(reply):
+            add_message(conv_id, "me", reply, ai_generated=True)
+            update_conversation_last_message(conv_id, reply, "me", 0)
+            increment_daily_stat("auto_replies_sent")
+            result["replies_sent"] += 1
+            if hasattr(self, "_reply_failures"):
+                self._reply_failures.pop(fail_key, None)
+            if task.get("interest"):
+                update_conversation_interest(conv_id, task["interest"])
+                log.info(f"[监控] HR兴趣度: {task['interest']}")
+            log.info("[监控] 回复已发送")
+            # 风险会话检测：Agent 内部通过 mark_dangerous 工具处理
+            if matched_conv.get("is_dangerous"):
+                log.warning(f"[监控] ⚠️ 会话已标记为风险: {matched_conv.get('hr_name')}")
+        else:
+            # 发送失败同样计入退避,防止反复失败无限重试
+            prev = self._bump_failure(fail_key)
+            log.warning(f"[监控] 回复发送失败（第{prev['count']}次失败）!")
+        self._clear_input_box()
+        pause(5, 15)
 
-            if clean_msgs:
-                replace_conversation_messages(conv_id, clean_msgs)
-                last_msg = clean_msgs[-1]
-                update_conversation_last_message(conv_id, last_msg["content"], last_msg["sender"], 0)
-
-                # 从 HR 消息里提取微信号
-                if not matched_conv.get("hr_wechat"):
-                    import re as _re
-
-                    for m in clean_msgs:
-                        if m["sender"] == "hr":
-                            patterns = [
-                                # wxid_xxxxxxxx 格式
-                                r"(?:wxid|WXID)[_\-]?\s*[:：]?\s*([a-zA-Z0-9_-]{6,30})",
-                                # 微信/VX/WeChat：xxx 格式
-                                r"(?:微信|VX|vx|wechat|WeChat)[号：:]*\s*[:：]?\s*([a-zA-Z0-9_-]{4,30})",
-                                # 加我/加V -> xxx
-                                r"(?:加我|加V|找V|加个V)\s*[:：]?\s*([a-zA-Z0-9_-]{4,30})",
-                                # 微信号 xxx（纯中文前缀）
-                                r"\u5fae\u4fe1\u53f7\s+([a-zA-Z0-9_-]{4,30})",
-                            ]
-                            for pat in patterns:
-                                match = _re.search(pat, m["content"])
-                                if match:
-                                    wx_id = match.group(1).strip()
-                                    if wx_id and len(wx_id) >= 5:
-                                        update_conversation_wechat(conv_id, wx_id)
-                                        matched_conv["hr_wechat"] = wx_id
-                                        result["wechat_exchanged"] = True
-                                        log.info(f"[监控] 提取HR微信: {wx_id}")
-                                        break
-
-            # 提取尾部连续未回复的 HR 消息块（HR 连发多条时整块回复）
-            unreplied_hr_msg = extract_unreplied_block(clean_msgs)
-            if unreplied_hr_msg:
-                new_count = 1
-                log.info(f"[监控] 待回复HR消息: {unreplied_hr_msg[:60]}...")
-
-            if unreplied_hr_msg:
-                result["new_messages"] += 1
-
-            # 自动回复
-            auto_reply_enabled = get_setting("auto_reply_enabled", "true") == "true"
-            if unreplied_hr_msg and auto_reply_enabled:
-                today_replies = get_today_auto_reply_count()
-                if today_replies >= MAX_AUTO_REPLY_PER_DAY:
-                    continue
-
-                # 失败退避：同一条消息连续失败次数超限 → 冷却期内跳过
-                if not hasattr(self, "_reply_failures"):
-                    self._reply_failures = {}
-                fail_key = (conv_id, hash(unreplied_hr_msg))
-                fail_state = self._reply_failures.get(fail_key)
-                if (
-                    fail_state
-                    and fail_state["count"] >= REPLY_FAILURE_LIMIT
-                    and time.time() - fail_state["last_ts"] < REPLY_BACKOFF_SECONDS
-                ):
-                    log.info(
-                        f"[监控] 会话 {matched_conv.get('hr_name')} 该消息连续生成失败 {fail_state['count']} 次，冷却中，本轮跳过"
-                    )
-                    continue
-
-                try:
-                    from backend.replier import generate_reply
-
-                    job_title = matched_conv.get("job_title", "")
-                    job_company = matched_conv.get("hr_company", "")
-                    job_desc = ""
-                    app_id = matched_conv.get("application_id")
-                    if app_id:
-                        app = get_application(app_id)
-                        if app:
-                            job_desc = app.get("description") or ""
-                            job_title = job_title or app.get("job_title", "")
-                            job_company = job_company or app.get("company", "")
-
-                    # 会话未关联投递记录时，按 HR 名反查回填岗位信息
-                    if not (job_desc and job_title and job_company):
-                        app2 = get_application_by_hr_name(hr_name_to_open) or get_application_by_hr_name(
-                            matched_conv.get("hr_name", "")
-                        )
-                        if app2:
-                            job_desc = job_desc or (app2.get("description") or "")
-                            job_title = job_title or app2.get("job_title", "")
-                            job_company = job_company or app2.get("company", "")
-                            if app2.get("id") and not matched_conv.get("application_id"):
-                                try:
-                                    from backend.state import get_db as _gdb
-
-                                    _gdb().execute(
-                                        "UPDATE conversations SET application_id=? WHERE id=?",
-                                        (app2["id"], conv_id),
-                                    )
-                                    _gdb().commit()
-                                    matched_conv["application_id"] = app2["id"]
-                                    log.info(f"[监控] 会话已关联岗位: {app2.get('job_title')}")
-                                except Exception:
-                                    pass
-
-                    job_info = {
-                        "title": job_title,
-                        "company": job_company,
-                        "description": job_desc,
-                    }
-                    style = get_setting("ai_reply_style", "professional")
-                    resume = get_setting("resume_summary", "")
-                    wechat = get_setting("wechat_id", "")
-
-                    # 构建 Agent 上下文（工具调用在 Agent 循环内部完成）
-                    agent_ctx = {
-                        "automation": self,
-                        "conversation_id": conv_id,
-                        "matched_conv": matched_conv,
-                        "hr_name": hr_name_to_open,
-                        "job_info": job_info,
-                    }
-
-                    reply, interest, extra_data = generate_reply(
-                        conv_id, unreplied_hr_msg, job_info, style, resume, wechat,
-                        agent_ctx=agent_ctx
-                    )
-
-                    # 回复去重：与我方最后一条消息完全相同则重新生成一次，仍相同则跳过本轮
-                    last_me = next(
-                        (m["content"] for m in reversed(clean_msgs) if m["sender"] == "me"), ""
-                    )
-                    if reply and reply == last_me:
-                        log.info("[监控] 生成的回复与上一条重复，重新生成一次")
-                        reply, interest, extra_data = generate_reply(
-                            conv_id, unreplied_hr_msg, job_info, style, resume, wechat,
-                            agent_ctx=agent_ctx
-                        )
-                        if reply and reply == last_me:
-                            log.warning("[监控] 重新生成后仍与上一条重复，跳过本轮发送")
-                            reply = ""
-
-                    if reply:
-                        # 发送回复（工具操作已在 Agent 内部完成）
-                        log.info(f"[监控] AI回复: {reply[:60]}...")
-                        if self.send_message(reply):
-                            add_message(conv_id, "me", reply, ai_generated=True)
-                            update_conversation_last_message(conv_id, reply, "me", 0)
-                            increment_daily_stat("auto_replies_sent")
-                            result["replies_sent"] += 1
-                            self._reply_failures.pop(fail_key, None)
-                            if interest:
-                                update_conversation_interest(conv_id, interest)
-                                log.info(f"[监控] HR兴趣度: {interest}")
-                            log.info("[监控] 回复已发送")
-                            # 风险会话检测：Agent 内部通过 mark_dangerous 工具处理
-                            if matched_conv.get("is_dangerous"):
-                                log.warning(f"[监控] ⚠️ 会话已标记为风险: {matched_conv.get('hr_name')}")
-                        else:
-                            log.warning("[监控] 回复发送失败!")
-                        pause(5, 15)
-                    else:
-                        # 生成失败（空回复）：累计失败次数用于退避
-                        prev = self._reply_failures.get(fail_key, {"count": 0, "last_ts": 0})
-                        prev["count"] += 1
-                        prev["last_ts"] = time.time()
-                        self._reply_failures[fail_key] = prev
-                        log.warning(
-                            f"[监控] 回复生成为空（第{prev['count']}次失败）: {matched_conv.get('hr_name')}"
-                        )
-                except Exception as e:
-                    prev = self._reply_failures.get(fail_key, {"count": 0, "last_ts": 0})
-                    prev["count"] += 1
-                    prev["last_ts"] = time.time()
-                    self._reply_failures[fail_key] = prev
-                    log.error(f"AI回复生成失败: {e}", exc_info=True)
-            elif unreplied_hr_msg and not auto_reply_enabled:
-                log.info("[监控] 自动回复已关闭，跳过")
-
-            # 下一个会话前确保输入框已清空，避免残留文字
-            try:
-                input_el = self.page.locator("#chat-input").first
-                text = input_el.inner_text().strip()
-                if text:
-                    log.debug(f"[监控] 输入框残留文字「{text[:30]}...」，正在清空")
-                    input_el.click()
-                    self.page.keyboard.press("Control+a")
-                    self.page.keyboard.press("Backspace")
-                    pause(0.3, 0.5)
-            except Exception:
-                pass
-            # 重新切「未读」Tab，刷新侧边栏列表（BOSS 可能已把刚才的会话标记为已读移出列表）
-            for sel in ['span.label-name:has-text("未读")', '.label-name:has-text("未读")']:
-                try:
-                    tab = self.page.locator(sel).first
-                    if tab.is_visible():
-                        tab.click()
-                        pause(0.5, 1)
-                        break
-                except Exception:
-                    pass
-            pause(0.5, 1)
-
-        log.info(f"[监控] 本轮完成: 消息 {result['new_messages']}, 回复 {result['replies_sent']}")
-        return result

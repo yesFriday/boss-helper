@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Smartphone, Copy, RefreshCw } from 'lucide-react'
+import { Button } from '../components/common/Button'
 import { EmptyState } from '../components/common/EmptyState'
 import { useNotificationStore } from '../stores/notificationStore'
 import { wechatApi } from '../api/wechat'
@@ -38,10 +39,10 @@ export function WechatPage() {
   return (
     <div className="animate-slide-in">
       <div className="flex items-center justify-between mb-5">
-        <h3 className="text-lg font-bold text-slate-800">已获取的 HR 微信</h3>
+        <h3 className="text-lg font-semibold text-slate-900">已获取的 HR 微信</h3>
         <button
           onClick={loadExchanges}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:border-slate-300 transition-colors cursor-pointer"
         >
           <RefreshCw size={12} />
           刷新
@@ -53,27 +54,28 @@ export function WechatPage() {
           {exchanges.map((ex, i) => (
             <div
               key={i}
-              className="bg-white rounded-xl p-5 shadow-sm border border-slate-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+              className="rounded-xl bg-white border border-slate-200 p-4"
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <div className="font-bold text-base text-slate-800 mb-2">{ex.hr_name}</div>
+                  <div className="font-medium text-slate-900 mb-2">{ex.hr_name}</div>
                   {ex.job_description && (
-                    <div className="text-xs text-slate-500 mb-3 p-3 bg-slate-50 rounded-lg border border-slate-200 leading-relaxed">
+                    <div className="text-xs text-slate-500 mb-3 p-3 bg-slate-50 rounded-md leading-relaxed">
                       {ex.job_description}
                     </div>
                   )}
                   <div className="flex items-center gap-3">
-                    <code className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base font-semibold text-indigo-600">
+                    <code className="font-mono text-sm text-slate-700 bg-slate-50 rounded-md px-2.5 py-1">
                       {ex.hr_wechat}
                     </code>
-                    <button
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => handleCopy(ex.hr_wechat)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-sm hover:shadow-md transition-all cursor-pointer"
                     >
                       <Copy size={12} />
                       复制
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <div className="text-xs text-slate-400 text-right ml-4">
@@ -87,7 +89,7 @@ export function WechatPage() {
         </div>
       ) : (
         <EmptyState
-          icon={<Smartphone size={48} />}
+          icon={<Smartphone size={48} className="text-slate-300" />}
           title="暂无微信记录"
           description="当 HR 分享微信时会自动记录在这里"
         />

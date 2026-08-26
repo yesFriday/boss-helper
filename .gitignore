@@ -1,9 +1,30 @@
-.boss_profile/
+# Python
 __pycache__/
 *.pyc
+.venv/
 .env
 **/.env
-.DS_Store
+.boss_profile/
+
+# Node
+node_modules/
+
+# 构建产物 / 编译缓存
+build_temp/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/
+dist/
+static/dist/
+frontend/dist/
+
+# 数据与报告
 reports/
+*.db
+*.sqlite3
+
+# IDE / 系统
 .claude/
-.venv/
+.DS_Store
+.vscode/
+.idea/

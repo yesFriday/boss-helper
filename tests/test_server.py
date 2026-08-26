@@ -101,7 +101,7 @@ def format_mock_context(req: TestReplyRequest) -> str:
     return "\n".join(parts)
 
 @app.post("/api/test-reply")
-def test_reply_endpoint(req: TestReplyRequest):
+def test_reply_endpoint(req: TestReplyRequest):  # noqa: N802
     try:
         context = format_mock_context(req)
         
@@ -139,6 +139,9 @@ def test_reply_endpoint(req: TestReplyRequest):
             "status": "error",
             "error": str(e)
         }
+
+# pytest 会把 test_ 开头的函数当测试收集,显式排除(这是 FastAPI 路由处理函数)
+test_reply_endpoint.__test__ = False
 
 @app.get("/")
 def serve_index():

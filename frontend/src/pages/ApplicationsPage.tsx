@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Star, Send } from 'lucide-react'
+import { Star, Send, ExternalLink } from 'lucide-react'
 import { Spinner } from '../components/common/Spinner'
+import { Button } from '../components/common/Button'
 import { useJobsStore } from '../stores/jobsStore'
 import { useSystemStore } from '../stores/systemStore'
-import { useSettingsStore } from '../stores/settingsStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { jobsApi } from '../api/jobs'
 import { shortlistsApi } from '../api/shortlists'
@@ -11,19 +11,16 @@ import { systemApi } from '../api/system'
 import { STATUS_MAP, STATUS_BADGE_CLASS, HR_ACTIVE_BADGE_CLASS } from '../lib/constants'
 import { cn } from '../lib/cn'
 
-const PAGE_SIZE = 15
+const PAGE_SIZE = 20
 
 export function ApplicationsPage() {
   const { appJobs, appCurrentPage, batchProgress } = useJobsStore()
   const { todayApplications } = useSystemStore()
-  const { settings } = useSettingsStore()
   const { addToast } = useNotificationStore()
   const [filter, setFilter] = useState('')
   const [showShortlist, setShowShortlist] = useState(false)
   const [shortlists, setShortlists] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-
-  const dailyLimit = parseInt(settings.daily_apply_limit || '15', 10)
 
   useEffect(() => {
     loadApplications()
@@ -100,74 +97,77 @@ export function ApplicationsPage() {
   const pageJobs = appJobs.slice((appCurrentPage - 1) * PAGE_SIZE, appCurrentPage * PAGE_SIZE)
   const pending = appJobs.filter((j) => j.status === 'pending').length
   const replied = appJobs.filter((j) => j.status === 'replied').length
+  const interview = appJobs.filter((j) => j.status === 'interview').length
 
   return (
     <div className="animate-slide-in">
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-3 mb-5">
         {[
-          { label: '今日投递', value: todayApplications, color: 'from-indigo-400 to-purple-400' },
-          { label: '待投递', value: pending, color: 'from-amber-400 to-orange-400' },
-          { label: 'HR已回复', value: replied, color: 'from-emerald-400 to-teal-400' },
-          { label: '每日上限', value: dailyLimit, color: 'from-pink-400 to-rose-400' },
+          { label: '今日投递', value: todayApplications, accent: 'text-blue-600' },
+          { label: '待投递', value: pending, accent: 'text-amber-600' },
+          { label: 'HR已回复', value: replied, accent: 'text-emerald-600' },
+          { label: '面试邀请', value: interview, accent: 'text-violet-600' },
         ].map((item) => (
-          <div key={item.label} className="bg-white rounded-xl p-5 text-center shadow-sm border border-slate-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-            <div className={cn('text-3xl font-extrabold bg-gradient-to-r bg-clip-text text-transparent', item.color)}>
-              {item.value}
-            </div>
-            <div className="text-xs text-slate-400 mt-1 font-semibold uppercase tracking-wider">{item.label}</div>
+          <div key={item.label} className="rounded-xl bg-white border border-slate-200 p-4">
+            <div className={cn('text-2xl font-semibold', item.accent)}>{item.value}</div>
+            <div className="text-xs text-slate-400 mt-1">{item.label}</div>
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <div className="flex gap-2">
-            {['', 'pending', 'applied', 'replied'].map((s) => (
+      {/* Table card */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center justify-between p-4 flex-wrap gap-2 border-b border-slate-100">
+          <div className="flex gap-1.5 flex-wrap">
+            {[
+              { key: '', label: '全部' },
+              { key: 'pending', label: '待投递' },
+              { key: 'applied', label: '已投递' },
+              { key: 'replied', label: '已回复' },
+            ].map((s) => (
               <button
-                key={s}
-                onClick={() => { setFilter(s); setShowShortlist(false) }}
+                key={s.key}
+                onClick={() => { setFilter(s.key); setShowShortlist(false) }}
                 className={cn(
-                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
-                  filter === s && !showShortlist ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+                  filter === s.key && !showShortlist ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
                 )}
               >
-                {s ? STATUS_MAP[s] : '全部'}
+                {s.label}
               </button>
             ))}
+            <div className="w-px bg-slate-200 mx-1" />
             <button
               onClick={loadShortlists}
               className={cn(
-                'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
-                showShortlist ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                'inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+                showShortlist ? 'bg-amber-50 text-amber-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
               )}
             >
-              <Star size={12} className="inline mr-1" />
+              <Star size={12} className="mr-1" />
               收藏
             </button>
           </div>
-          <button
-            onClick={handleBatchApplyPending}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
-          >
-            <Send size={14} />
-            一键投递待投递
-          </button>
+          {!showShortlist && pending > 0 && (
+            <Button variant="primary" size="sm" onClick={handleBatchApplyPending}>
+              <Send size={13} />
+              一键投递待投递 ({pending})
+            </Button>
+          )}
         </div>
 
         {batchProgress && (
-          <div className="mb-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div className="px-4 py-3 bg-blue-50/50 border-b border-blue-100">
             <div className="flex justify-between items-center mb-2">
-              <span className="font-semibold text-sm">投递进度</span>
-              <span className="text-xs text-slate-500">{batchProgress.done}/{batchProgress.total} ({batchProgress.ok} 成功)</span>
+              <span className="text-sm font-medium text-blue-700">投递进度</span>
+              <span className="text-xs text-blue-600">{batchProgress.done}/{batchProgress.total} · {batchProgress.ok} 成功</span>
             </div>
-            <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300"
+                className="h-full bg-blue-600 rounded-full transition-all duration-300"
                 style={{ width: `${Math.round(batchProgress.done / batchProgress.total * 100)}%` }}
               />
-            </div>
-            <div className="text-xs text-indigo-600 font-semibold mt-1">
-              {Math.round(batchProgress.done / batchProgress.total * 100)}%
             </div>
           </div>
         )}
@@ -175,64 +175,70 @@ export function ApplicationsPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-slate-50">
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">岗位</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">公司</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">薪资</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">城市</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">HR活跃</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">状态</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">操作</th>
+              <tr className="border-b border-slate-100">
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400">岗位</th>
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400">公司</th>
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400">薪资</th>
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400">城市</th>
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400">HR活跃</th>
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400">状态</th>
+                <th className="text-left py-2.5 px-4 text-xs font-medium text-slate-400 w-20">操作</th>
               </tr>
             </thead>
             <tbody>
               {showShortlist ? (
                 shortlists.length > 0 ? (
                   shortlists.map((s) => (
-                    <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50">
+                    <tr key={s.id} className="border-t border-slate-50 hover:bg-slate-50/50 transition-colors">
                       <td className="py-3 px-4">
-                        <a href={s.job_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">
+                        <a href={s.job_url} target="_blank" rel="noopener noreferrer" className="text-slate-800 hover:text-blue-600 font-medium inline-flex items-center gap-1">
                           {s.job_title}
+                          <ExternalLink size={11} className="text-slate-300" />
                         </a>
                       </td>
                       <td className="py-3 px-4 text-slate-600">{s.company}</td>
-                      <td className="py-3 px-4 text-red-500 font-semibold">{s.salary}</td>
+                      <td className="py-3 px-4 text-slate-900 font-medium">{s.salary}</td>
                       <td className="py-3 px-4 text-slate-600">{s.city}</td>
                       <td className="py-3 px-4">
                         {s.hr_active_time ? (
-                          <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold border', HR_ACTIVE_BADGE_CLASS[s.hr_active_time] || 'bg-gray-100 text-gray-500 border-gray-200')}>
+                          <span className={cn('px-2 py-0.5 rounded-md text-xs font-medium border', HR_ACTIVE_BADGE_CLASS[s.hr_active_time] || 'bg-gray-50 text-gray-500 border-gray-200')}>
                             {s.hr_active_time}
                           </span>
                         ) : (
                           <span className="text-xs text-slate-300">-</span>
                         )}
                       </td>
-                      <td className="py-3 px-4"><span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">收藏</span></td>
+                      <td className="py-3 px-4"><span className="px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">★ 收藏</span></td>
                       <td className="py-3 px-4">
-                        <div className="flex gap-2">
-                          <button onClick={() => handleRemoveShortlist(s.id)} className="px-2.5 py-1 rounded-lg text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer">取消</button>
-                          <button onClick={() => handleApply(s.job_url)} className="px-2.5 py-1 rounded-lg text-xs bg-indigo-500 text-white hover:bg-indigo-600 cursor-pointer">投递</button>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => handleRemoveShortlist(s.id)} className="text-xs text-slate-400 hover:text-red-500 transition-colors cursor-pointer px-1.5 py-1 rounded hover:bg-red-50">取消</button>
+                          <button onClick={() => handleApply(s.job_url)} className="text-xs text-blue-600 font-medium hover:bg-blue-50 px-1.5 py-1 rounded transition-colors cursor-pointer">投递</button>
                         </div>
                       </td>
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan={7} className="py-8 text-center text-slate-400">暂无收藏</td></tr>
+                  <tr><td colSpan={7} className="py-10 text-center text-slate-400">暂无收藏</td></tr>
                 )
               ) : pageJobs.length > 0 ? (
                 pageJobs.map((job) => (
-                  <tr key={job.id || job.job_url} className="border-t border-slate-100 hover:bg-slate-50">
+                  <tr key={job.id || job.job_url} className="border-t border-slate-50 hover:bg-slate-50/50 transition-colors">
                     <td className="py-3 px-4">
-                      <a href={job.job_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">
-                        {job.job_title || job.title || '未知'}
-                      </a>
+                      {job.job_url ? (
+                        <a href={job.job_url} target="_blank" rel="noopener noreferrer" className="text-slate-800 hover:text-blue-600 font-medium inline-flex items-center gap-1">
+                          {job.job_title || job.title || '未知'}
+                          <ExternalLink size={11} className="text-slate-300" />
+                        </a>
+                      ) : (
+                        <span className="text-slate-800 font-medium">{job.job_title || job.title || '未知'}</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-slate-600">{job.company}</td>
-                    <td className="py-3 px-4 text-red-500 font-semibold">{job.salary}</td>
+                    <td className="py-3 px-4 text-slate-900 font-medium">{job.salary}</td>
                     <td className="py-3 px-4 text-slate-600">{job.city}</td>
                     <td className="py-3 px-4">
                       {job.hr_active_time ? (
-                        <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold border', HR_ACTIVE_BADGE_CLASS[job.hr_active_time] || 'bg-gray-100 text-gray-500 border-gray-200')}>
+                        <span className={cn('px-2 py-0.5 rounded-md text-xs font-medium border', HR_ACTIVE_BADGE_CLASS[job.hr_active_time] || 'bg-gray-50 text-gray-500 border-gray-200')}>
                           {job.hr_active_time}
                         </span>
                       ) : (
@@ -240,61 +246,58 @@ export function ApplicationsPage() {
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold', STATUS_BADGE_CLASS[job.status || 'pending'])}>
+                      <span className={cn('rounded-md px-2 py-0.5 text-xs font-medium', STATUS_BADGE_CLASS[job.status || 'pending'])}>
                         {STATUS_MAP[job.status || 'pending']}
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      {job.job_url && (
-                        <button onClick={() => handleApply(job.job_url)} className="px-2.5 py-1 rounded-lg text-xs bg-indigo-500 text-white hover:bg-indigo-600 cursor-pointer">
+                      {job.status === 'pending' && job.job_url ? (
+                        <button
+                          onClick={() => handleApply(job.job_url)}
+                          className="text-xs text-slate-400 hover:text-blue-600 transition-colors cursor-pointer px-1.5 py-1 rounded hover:bg-blue-50"
+                        >
                           投递
                         </button>
+                      ) : (
+                        <span className="text-xs text-slate-300">-</span>
                       )}
                     </td>
                   </tr>
                 ))
               ) : loading ? (
-                <tr><td colSpan={7} className="py-8 text-center"><Spinner size="md" /></td></tr>
+                <tr><td colSpan={7} className="py-10 text-center"><Spinner size="md" /></td></tr>
               ) : (
-                <tr><td colSpan={7} className="py-8 text-center text-slate-400">暂无记录</td></tr>
+                <tr><td colSpan={7} className="py-10 text-center text-slate-400">暂无记录</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         {!showShortlist && totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 mt-4">
+          <div className="flex items-center justify-center gap-1 p-3 border-t border-slate-100">
             <button
               onClick={() => useJobsStore.getState().setAppCurrentPage(1)}
               disabled={appCurrentPage <= 1}
-              className="px-3 py-1.5 rounded-lg text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 cursor-pointer"
-            >
-              «
-            </button>
+              className="px-2.5 py-1.5 rounded-lg text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            >«</button>
             <button
               onClick={() => useJobsStore.getState().setAppCurrentPage(appCurrentPage - 1)}
               disabled={appCurrentPage <= 1}
-              className="px-3 py-1.5 rounded-lg text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 cursor-pointer"
-            >
-              ‹
-            </button>
+              className="px-2.5 py-1.5 rounded-lg text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            >‹</button>
             <span className="text-xs text-slate-400 px-3">
-              {(appCurrentPage - 1) * PAGE_SIZE + 1}-{Math.min(appCurrentPage * PAGE_SIZE, appJobs.length)} / {appJobs.length}
+              {appCurrentPage} / {totalPages}
             </span>
             <button
               onClick={() => useJobsStore.getState().setAppCurrentPage(appCurrentPage + 1)}
               disabled={appCurrentPage >= totalPages}
-              className="px-3 py-1.5 rounded-lg text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 cursor-pointer"
-            >
-              ›
-            </button>
+              className="px-2.5 py-1.5 rounded-lg text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            >›</button>
             <button
               onClick={() => useJobsStore.getState().setAppCurrentPage(totalPages)}
               disabled={appCurrentPage >= totalPages}
-              className="px-3 py-1.5 rounded-lg text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 cursor-pointer"
-            >
-              »
-            </button>
+              className="px-2.5 py-1.5 rounded-lg text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            >»</button>
           </div>
         )}
       </div>

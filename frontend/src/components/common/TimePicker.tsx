@@ -36,10 +36,10 @@ export function TimePicker({ value, onChange, className }: TimePickerProps) {
         type="button"
         onClick={() => setOpen(!open)}
         className={cn(
-          'px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm font-mono',
-          'outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer',
-          'hover:bg-slate-100 min-w-[72px] text-center',
-          open && 'border-indigo-500 ring-2 ring-indigo-500/20',
+          'px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-900',
+          'outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-colors cursor-pointer',
+          'hover:border-slate-300 min-w-[72px] text-center',
+          open && 'border-blue-500 ring-2 ring-blue-500/15',
           className
         )}
       >
@@ -62,8 +62,8 @@ export function TimePicker({ value, onChange, className }: TimePickerProps) {
                   className={cn(
                     'py-1 text-sm rounded-md transition-colors cursor-pointer text-center',
                     hour === h
-                      ? 'bg-indigo-500 text-white font-semibold'
-                      : 'text-slate-600 hover:bg-indigo-50'
+                      ? 'bg-blue-600 text-white font-medium'
+                      : 'text-slate-600 hover:bg-blue-50'
                   )}
                 >
                   {pad(hour)}
@@ -86,8 +86,8 @@ export function TimePicker({ value, onChange, className }: TimePickerProps) {
                   className={cn(
                     'py-1 text-sm rounded-md transition-colors cursor-pointer text-center',
                     minute === m
-                      ? 'bg-indigo-500 text-white font-semibold'
-                      : 'text-slate-600 hover:bg-indigo-50'
+                      ? 'bg-blue-600 text-white font-medium'
+                      : 'text-slate-600 hover:bg-blue-50'
                   )}
                 >
                   {pad(minute)}

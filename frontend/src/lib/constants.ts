@@ -24,23 +24,23 @@ export const STATUS_MAP: Record<string, string> = {
 }
 
 export const STATUS_BADGE_CLASS: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  applied: 'bg-blue-100 text-blue-800',
-  replied: 'bg-green-100 text-green-800',
-  skipped: 'bg-gray-100 text-gray-600',
-  failed: 'bg-red-100 text-red-800',
-  missing_url: 'bg-orange-100 text-orange-800',
+  pending: 'bg-amber-50 text-amber-700 ring-amber-200',
+  applied: 'bg-blue-50 text-blue-700 ring-blue-200',
+  replied: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  skipped: 'bg-slate-100 text-slate-500 ring-slate-200',
+  failed: 'bg-red-50 text-red-700 ring-red-200',
+  missing_url: 'bg-orange-50 text-orange-700 ring-orange-200',
 }
 
 export const HR_ACTIVE_BADGE_CLASS: Record<string, string> = {
-  在线: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  '刚刚活跃': 'bg-teal-100 text-teal-800 border-teal-300',
-  '今日活跃': 'bg-sky-100 text-sky-800 border-sky-300',
-  '3日内活跃': 'bg-blue-100 text-blue-800 border-blue-300',
-  '本周活跃': 'bg-indigo-100 text-indigo-800 border-indigo-300',
-  '本月活跃': 'bg-violet-100 text-violet-800 border-violet-300',
-  '半年前活跃': 'bg-gray-100 text-gray-500 border-gray-200',
-  '一年前活跃': 'bg-gray-100 text-gray-400 border-gray-200',
+  在线: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  '刚刚活跃': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  '今日活跃': 'bg-blue-50 text-blue-700 border-blue-200',
+  '3日内活跃': 'bg-blue-50 text-blue-600 border-blue-200',
+  '本周活跃': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  '本月活跃': 'bg-violet-50 text-violet-700 border-violet-200',
+  '半年前活跃': 'bg-slate-100 text-slate-500 border-slate-200',
+  '一年前活跃': 'bg-slate-100 text-slate-400 border-slate-200',
 }
 
 export const AI_PLATFORMS: Record<string, { baseUrl: string; models: { v: string; t: string }[] }> = {

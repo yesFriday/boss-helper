@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Search, Zap, Send, Filter, ChevronDown } from 'lucide-react'
 import { CITY_GROUPS } from '../../lib/constants'
 import { cn } from '../../lib/cn'
+import { Button } from '../common/Button'
 
 interface SearchBarProps {
   onSearch: (keyword: string, city: string, welfare?: string, salaryExpect?: number, experienceExpect?: number, excludeHrActive?: string) => void
@@ -54,12 +55,12 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           placeholder="关键词"
-          className="flex-1 min-w-[160px] px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+          className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-colors"
         />
         <select
           value={city}
           onChange={(e) => setCity(e.target.value)}
-          className="px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 cursor-pointer min-w-[100px]"
+          className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-colors cursor-pointer min-w-[100px]"
         >
           {CITY_GROUPS.map((group) => (
             <optgroup key={group.label} label={group.label}>
@@ -70,33 +71,25 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
           ))}
           <option value="全国">全国</option>
         </select>
-        <button
-          onClick={handleSearch}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 cursor-pointer"
-        >
+        <Button variant="primary" size="md" onClick={handleSearch} disabled={loading}>
           <Search size={16} />
           搜索
-        </button>
-        <button
-          onClick={onBatchSearch}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-amber-500 to-orange-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
-        >
+        </Button>
+        <Button variant="secondary" size="md" onClick={onBatchSearch}>
           <Zap size={16} />
           一键搜索
-        </button>
-        <button
-          onClick={onBatchApply}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
-        >
+        </Button>
+        <Button variant="success" size="md" onClick={onBatchApply}>
           <Send size={16} />
           一键投递
-        </button>
+        </Button>
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer',
-            showAdvanced ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer',
+            showAdvanced
+              ? 'bg-blue-50 text-blue-700 border-blue-300'
+              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
           )}
         >
           <Filter size={14} />
@@ -113,7 +106,7 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
               value={welfare}
               onChange={(e) => setWelfare(e.target.value)}
               placeholder="福利:双休,五险一金"
-              className="flex-1 min-w-[180px] px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              className="flex-1 min-w-[180px] px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-colors"
             />
             <input
               type="number"
@@ -121,7 +114,7 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
               value={salaryExpect}
               onChange={(e) => setSalaryExpect(e.target.value)}
               placeholder="期望薪资(K)"
-              className="w-28 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              className="w-28 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-colors"
             />
             <input
               type="number"
@@ -129,7 +122,7 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
               value={experienceExpect}
               onChange={(e) => setExperienceExpect(e.target.value)}
               placeholder="工作年限(年)"
-              className="w-28 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              className="w-28 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 transition-colors"
             />
           </div>
           <div className="flex items-center gap-3">
@@ -140,10 +133,10 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
                   key={opt.value}
                   onClick={() => toggleExclude(opt.value)}
                   className={cn(
-                    'px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer',
+                    'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors cursor-pointer',
                     excludeHrActive.includes(opt.value)
-                      ? 'bg-red-50 border-red-300 text-red-600 line-through'
-                      : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-600'
+                      ? 'bg-blue-50 border-blue-300 text-blue-700 line-through'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                   )}
                 >
                   {opt.label}
@@ -151,7 +144,7 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
               ))}
             </div>
             {excludeHrActive.length > 0 && (
-              <span className="text-xs text-red-400 flex-shrink-0">已排除 {excludeHrActive.length} 项</span>
+              <span className="text-xs text-slate-400 flex-shrink-0">已排除 {excludeHrActive.length} 项</span>
             )}
           </div>
         </div>

@@ -50,7 +50,10 @@ pub fn run() {
             let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             let _tray = TrayIconBuilder::new()
+                .icon(tauri::include_image!("icons/icon.png"))
+                .icon_as_template(false)
                 .menu(&tray_menu)
+                .show_menu_on_left_click(false)
                 .tooltip("BOSS直聘智能求职助手")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
@@ -68,7 +71,10 @@ pub fn run() {
                                 .timeout(Duration::from_secs(2))
                                 .send();
                         });
-                        std::thread::sleep(Duration::from_millis(300));
+                        // destroy 不触发 CloseRequested,可绕过"隐藏到托盘"的拦截
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.destroy();
+                        }
                         app.exit(0);
                     }
                     _ => {}
@@ -82,9 +88,16 @@ pub fn run() {
                     {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
+                            if window.is_minimized().unwrap_or(false) {
+                                // 最小化状态:恢复窗口并聚焦
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            } else if window.is_visible().unwrap_or(false) {
+                                // 可见状态:最小化
+                                let _ = window.minimize();
                             } else {
+                                // 隐藏状态:显示并聚焦
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }

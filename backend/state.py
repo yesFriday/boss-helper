@@ -138,6 +138,12 @@ def init_db():
         db.execute("ALTER TABLE conversations ADD COLUMN summary_upto_id INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    # 会话身份主键：BOSS securityId（同名不同 HR 也能区分）
+    try:
+        db.execute("ALTER TABLE conversations ADD COLUMN security_id TEXT")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_conversations_security_id ON conversations(security_id)")
+    except sqlite3.OperationalError:
+        pass
     # 工具事件表：Agent 有副作用的工具调用记录（发简历/换微信/约面试等），供后续轮次上下文回溯
     db.executescript("""
         CREATE TABLE IF NOT EXISTS tool_events (
@@ -460,25 +466,64 @@ def get_pending_applications_by_activity(
 # ══════════════════════════════════════
 
 
-def get_or_create_conversation(application_id: int, hr_name: str, hr_company: str, job_title: str) -> int:
+def get_or_create_conversation(
+    application_id: int, hr_name: str, hr_company: str, job_title: str, security_id: str = ""
+) -> int:
     db = get_db()
+    # securityId 精确归并（会话身份主键，同名不同 HR 也能区分）
+    sid = (security_id or "").strip()
+    if sid:
+        row = db.execute(
+            "SELECT id FROM conversations WHERE security_id=? AND status!='closed'", (sid,)
+        ).fetchone()
+        if row:
+            # 名字以更精确的提取值为准
+            name = hr_name.strip() if hr_name else ""
+            if name:
+                db.execute("UPDATE conversations SET hr_name=? WHERE id=? AND hr_name!=?", (name, row["id"], name))
+                db.commit()
+            return row["id"]
     if application_id:
         row = db.execute("SELECT id FROM conversations WHERE application_id=?", (application_id,)).fetchone()
         if row:
+            if sid:
+                db.execute("UPDATE conversations SET security_id=? WHERE id=?", (sid, row["id"]))
+                db.commit()
             return row["id"]
-    # 按 HR 名字查重（精确匹配，去空白）
+    # 按 HR 名字查重（精确匹配，去空白）；有 securityId 的名字撞车不归并（可能同名不同人）
     name = hr_name.strip() if hr_name else ""
-    if name:
+    if name and not sid:
         row = db.execute("SELECT id FROM conversations WHERE hr_name=? AND status!='closed'", (name,)).fetchone()
         if row:
             return row["id"]
     cur = db.execute(
-        """INSERT INTO conversations (application_id, hr_name, hr_company, job_title)
-           VALUES (?, ?, ?, ?)""",
-        (application_id, name, hr_company, job_title),
+        """INSERT INTO conversations (application_id, hr_name, hr_company, job_title, security_id)
+           VALUES (?, ?, ?, ?, ?)""",
+        (application_id, name, hr_company, job_title, sid or None),
     )
     db.commit()
     return cur.lastrowid
+
+
+def get_conversation_by_security_id(security_id: str) -> Optional[dict]:
+    if not security_id:
+        return None
+    return _row_to_dict(
+        get_db()
+        .execute("SELECT * FROM conversations WHERE security_id=?", (security_id,))
+        .fetchone()
+    )
+
+
+def update_conversation_security_id(conversation_id: int, security_id: str):
+    """学习/修正会话的 securityId（存量会话首次打开时回填）。"""
+    if not security_id:
+        return
+    get_db().execute(
+        "UPDATE conversations SET security_id=? WHERE id=? AND (security_id IS NULL OR security_id='')",
+        (security_id, conversation_id),
+    )
+    get_db().commit()
 
 
 def get_conversation(conv_id: int) -> Optional[dict]:
@@ -496,6 +541,27 @@ def list_active_conversations(dangerous_only: bool = False) -> List[dict]:
         get_db().execute(
             "SELECT * FROM conversations WHERE status!='closed' AND is_dangerous=0 ORDER BY updated_at DESC"
         ).fetchall()
+    )
+
+
+def get_stale_hr_conversations(minutes: int = 10, limit: int = 2) -> List[dict]:
+    """孤儿消息兜底扫描：最后一条是 HR 消息且超过 N 分钟未回复的活跃会话。
+
+    未读红点一旦被打开即消失，回复失败的消息会"已读未回"且永不再试；
+    本查询从 DB 侧兜底找回这些会话。last_message_at 以 CURRENT_TIMESTAMP(UTC) 存储，
+    与 datetime('now') 同基准。
+    """
+    return _rows_to_list(
+        get_db()
+        .execute(
+            """SELECT * FROM conversations
+               WHERE status='active' AND auto_reply_enabled=1 AND is_dangerous=0
+                 AND last_message_from='hr'
+                 AND last_message_at < datetime('now', ?)
+               ORDER BY last_message_at ASC LIMIT ?""",
+            (f"-{int(minutes)} minutes", limit),
+        )
+        .fetchall()
     )
 
 

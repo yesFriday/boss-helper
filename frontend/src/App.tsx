@@ -14,6 +14,8 @@ function App() {
   useWebSocket()
   const { activeTab } = useAppStore()
 
+  const isFullHeightPage = activeTab === 'chat'
+
   const renderPage = () => {
     switch (activeTab) {
       case 'search': return <SearchPage />
@@ -29,9 +31,13 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 flex flex-col min-h-0 p-6">
         <PageHeader />
-        {renderPage()}
+        {isFullHeightPage ? (
+          <div className="flex-1 min-h-0 flex flex-col">{renderPage()}</div>
+        ) : (
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">{renderPage()}</div>
+        )}
       </main>
       <ToastContainer />
     </div>
