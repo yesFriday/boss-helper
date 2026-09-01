@@ -619,7 +619,7 @@ class BossChatMonitor(BossApplier):
             return False
 
     def send_resume(self) -> bool:
-        """点击「发简历」按钮，等弹窗后点「发送」确认。
+        """点击「发简历」按钮，等弹窗后点「确定」确认发送。
         确认弹窗未出现视为失败——绝不能在没有确认发送的情况下返回成功,
         否则会向HR谎称"简历已发"。"""
         try:
@@ -631,21 +631,47 @@ class BossChatMonitor(BossApplier):
             log.info("[发简历] 已点击发简历按钮")
             pause(1, 2)
 
-            # 等弹窗出现 → 点「发送」按钮
-            confirm = self._find_element(SELECTORS["resume_confirm_btn"], timeout_ms=5000)
-            if confirm:
-                confirm.click()
-                pause(0.5, 1)
-                log.info("[发简历] 已点发送按钮")
-                return True
+            # 两阶段弹窗(首次发送/无默认简历):先选「发送在线简历」。
+            # 自动流程无法上传附件文件,只能走在线简历路径
+            online = self._find_element(SELECTORS["resume_online_option"], timeout_ms=2000)
+            if online:
+                online.click()
+                log.info("[发简历] 已选择「发送在线简历」")
+                pause(1, 2)
 
-            # 弹窗未出现 → 发送未完成,必须返回失败并尝试关闭可能残留的弹窗
-            log.warning("[发简历] 未出现确认弹窗,简历未发送")
-            try:
-                self.page.keyboard.press("Escape")
-                pause(0.5, 1)
-            except Exception:
-                pass
+            # 等弹窗出现 → 点「确定」按钮(注意:按钮文字是「确定」不是「发送」)
+            confirm = self._find_element(SELECTORS["resume_confirm_btn"], timeout_ms=5000)
+            if not confirm:
+                # 弹窗未出现 → 发送未完成,必须返回失败并尝试关闭可能残留的弹窗
+                log.warning("[发简历] 未出现确认弹窗,简历未发送")
+                try:
+                    self.page.keyboard.press("Escape")
+                    pause(0.5, 1)
+                except Exception:
+                    pass
+                return False
+
+            confirm.click()
+            pause(1, 2)
+
+            # 校验:点击后确认弹窗应关闭(该 popover 对 Esc 无响应,点「取消」无效场景不存在)。
+            # 弹窗仍在说明点击未生效,重点一次;仍未关闭则如实返回失败
+            for _ in range(2):
+                try:
+                    if not confirm.is_visible():
+                        log.info("[发简历] 已点确定按钮,简历已发送")
+                        return True
+                except Exception:
+                    log.info("[发简历] 已点确定按钮,简历已发送")
+                    return True
+                log.warning("[发简历] 点确定后弹窗未关闭,重点一次")
+                try:
+                    confirm.click()
+                except Exception:
+                    pass
+                pause(1, 2)
+
+            log.warning("[发简历] 确认弹窗始终未关闭,简历未发送")
             return False
         except Exception as e:
             log.error(f"send_resume 失败: {e}", exc_info=True)

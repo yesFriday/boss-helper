@@ -58,11 +58,20 @@ SELECTORS = {
         '.chat-input-area button:has-text("发简历")',
     ],
     "resume_confirm_btn": [
-        # 弹窗作用域内的确认按钮优先,裸文本"发送"放最后兜底
+        # 真实 DOM:点「发简历」后,确认 popover 渲染在发简历按钮所在的
+        # toolbar-btn-content 容器内,按钮是 <span class="btn-v2 btn-sure-v2">确定</span>
+        # (文字是「确定」不是「发送」)。必须限定容器——否则会误中换电话 popover
+        # 的「确定」或聊天输入框的「发送」按钮(btn-sure-v2 同名)
+        'div.toolbar-btn-content:has(.toolbar-btn:has-text("发简历")) span.btn-sure-v2',
+        'div.toolbar-btn-content:has(.toolbar-btn:has-text("发简历")) .btn-v2:not(.btn-outline-v2)',
+        # 旧版全局弹窗结构兜底
         ".btn-sure-v2.btn-confirm",
         ".choose-resume-dialog .btn-confirm",
-        '.boss-popup__content button:has-text("发送")',
-        '.dialog-wrap button:has-text("发送")',
+    ],
+    "resume_online_option": [
+        # 两阶段弹窗(无默认简历/首次发送):先在 select-box 里选「发送在线简历」,
+        # 自动流程无法上传附件文件,只能走在线简历
+        '.select-box .select-one:has-text("发送在线简历")',
     ],
     "wechat_share_btn": [
         ".btn-weixin",
