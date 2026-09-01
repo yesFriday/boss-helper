@@ -12,7 +12,7 @@ export interface Job {
   hr_title: string
   hr_active_time?: string
   description: string
-  status: 'pending' | 'applied' | 'replied' | 'skipped' | 'failed' | 'missing_url'
+  status: 'pending' | 'applied' | 'replied' | 'interview' | 'skipped' | 'failed' | 'missing_url'
 }
 
 export interface Conversation {
@@ -85,6 +85,7 @@ export interface Settings {
   ai_model: string
   ai_key_configured: string
   ai_api_key?: string
+  ai_is_full_url?: string
   interview_format?: string
   interview_time_slots?: string
   interview_daily_limit?: string

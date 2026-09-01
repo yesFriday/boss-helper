@@ -85,6 +85,7 @@ export function SettingsPage() {
     ai_api_key: '',
     ai_base_url: '',
     ai_model: '',
+    ai_is_full_url: 'false',
     interview_format: 'both',
     interview_time_slots: '',
     interview_daily_limit: '3',
@@ -136,6 +137,7 @@ export function SettingsPage() {
         ai_api_key: s.ai_api_key || '',
         ai_base_url: s.ai_base_url || '',
         ai_model: s.ai_model || '',
+        ai_is_full_url: s.ai_is_full_url || 'false',
         interview_format: s.interview_format || 'both',
         interview_time_slots: s.interview_time_slots || '',
         interview_daily_limit: s.interview_daily_limit || '3',
@@ -163,6 +165,7 @@ export function SettingsPage() {
         auto_reply_enabled: formData.auto_reply_enabled,
         ai_base_url: formData.ai_base_url,
         ai_model: formData.ai_model,
+        ai_is_full_url: formData.ai_is_full_url,
         interview_format: formData.interview_format,
         interview_time_slots: JSON.stringify(timeSlots),
         interview_daily_limit: formData.interview_daily_limit,
@@ -176,7 +179,12 @@ export function SettingsPage() {
   const handleTestAi = async () => {
     setTestingAi(true)
     try {
-      const res = await settingsApi.testAiSettings({ ai_api_key: formData.ai_api_key, ai_base_url: formData.ai_base_url, ai_model: formData.ai_model })
+      const res = await settingsApi.testAiSettings({
+        ai_api_key: formData.ai_api_key,
+        ai_base_url: formData.ai_base_url,
+        ai_model: formData.ai_model,
+        ai_is_full_url: formData.ai_is_full_url,
+      })
       addToast(res.status === 'ok' ? res.message : (res.message || '测试失败'), res.status === 'ok' ? 'success' : 'error')
     } catch (e: any) { addToast(e.message || '网络错误', 'error') }
     finally { setTestingAi(false) }
@@ -356,7 +364,19 @@ export function SettingsPage() {
           </div>
         </Field>
         <Field label="Base URL">
-          <input type="text" value={formData.ai_base_url} onChange={(e) => setField('ai_base_url', e.target.value)} placeholder="自动填充" className={inputCls} />
+          <input type="text" value={formData.ai_base_url} onChange={(e) => setField('ai_base_url', e.target.value)} placeholder="自动填充或输入 API 地址" className={inputCls} />
+          <div className="mt-2 flex items-center">
+            <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={formData.ai_is_full_url === 'true'}
+                onChange={(e) => setField('ai_is_full_url', e.target.checked ? 'true' : 'false')}
+                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="font-medium text-slate-700">完整 URL 模式</span>
+              <span className="text-slate-400">（已包含 /chat/completions 等路径，不进行自动拼接）</span>
+            </label>
+          </div>
         </Field>
         <Field label="模型">
           <input type="text" value={formData.ai_model} onChange={(e) => setField('ai_model', e.target.value)} placeholder="选择或输入模型名" list="modelList" className={inputCls} />

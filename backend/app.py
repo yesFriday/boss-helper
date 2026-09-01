@@ -12,6 +12,7 @@ import random
 import re
 import sys
 import time
+import webbrowser
 from pathlib import Path
 from typing import Optional, List
 from urllib.parse import urljoin
@@ -33,6 +34,8 @@ from backend.state import (
     update_application_from_job,
     list_applications,
     update_application_status,
+    delete_application,
+    delete_applications,
     get_today_application_count,
     get_or_create_conversation,
     get_conversation,
@@ -352,6 +355,10 @@ class AnalyzeRequest(BaseModel):
     description: Optional[str] = ""
 
 
+class DeleteJobsBatchRequest(BaseModel):
+    job_ids: List[int]
+
+
 class SendMessageRequest(BaseModel):
     content: str
 
@@ -373,6 +380,7 @@ class SettingsUpdate(BaseModel):
     ai_api_key: Optional[str] = None  # AI API Key
     ai_base_url: Optional[str] = None  # AI Base URL
     ai_model: Optional[str] = None  # AI 模型名称
+    ai_is_full_url: Optional[str] = None  # 是否为完整 URL 模式
     interview_format: Optional[str] = None  # 面试形式限制 (online/offline/both)
     interview_time_slots: Optional[str] = None  # 面试时间段配置 (JSON格式)
     interview_daily_limit: Optional[str] = None  # 每日面试上限数
@@ -604,6 +612,23 @@ async def navigate_to_chat_page():
     }
 
 
+class OpenUrlRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/system/open-url")
+def open_system_url(req: OpenUrlRequest):
+    """使用系统默认浏览器打开指定 URL。"""
+    if not req.url:
+        raise HTTPException(status_code=400, detail="url 不能为空")
+    try:
+        webbrowser.open(req.url)
+        return {"status": "ok", "url": req.url}
+    except Exception as e:
+        log.error(f"打开链接失败 {req.url}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "browser": automation is not None}
@@ -798,6 +823,22 @@ async def skip_job(job_id: int):
     update_application_status(job_id, "skipped")
     await broadcast_ws({"type": "job_updated", "job_id": job_id, "status": "skipped"})
     return {"status": "ok"}
+
+
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: int):
+    success = delete_application(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="岗位记录不存在或已删除")
+    await broadcast_ws({"type": "job_deleted", "job_id": job_id})
+    return {"status": "ok", "deleted_id": job_id}
+
+
+@app.post("/api/jobs/delete-batch")
+async def delete_jobs_batch(req: DeleteJobsBatchRequest):
+    count = delete_applications(req.job_ids)
+    await broadcast_ws({"type": "jobs_batch_deleted", "job_ids": req.job_ids, "count": count})
+    return {"status": "ok", "deleted_count": count}
 
 
 # ══════════════════════════════════════
@@ -1167,6 +1208,7 @@ class AITestRequest(BaseModel):
     ai_api_key: Optional[str] = None
     ai_base_url: Optional[str] = None
     ai_model: Optional[str] = None
+    ai_is_full_url: Optional[str] = None
 
 
 @app.post("/api/settings/test-ai")
@@ -1174,6 +1216,7 @@ def test_ai_settings(req: AITestRequest):
     api_key = req.ai_api_key
     base_url = req.ai_base_url
     model = req.ai_model
+    is_full_url = req.ai_is_full_url
 
     if not api_key:
         api_key = get_setting("ai_api_key", "")
@@ -1181,9 +1224,23 @@ def test_ai_settings(req: AITestRequest):
         base_url = get_setting("ai_base_url", "https://api.deepseek.com")
     if not model:
         model = get_setting("ai_model", "deepseek-chat")
+    if is_full_url is None:
+        is_full_url = get_setting("ai_is_full_url", "false")
 
     if not api_key:
         return {"status": "error", "message": "API Key 不能为空"}
+
+    # 处理 base_url：
+    # 如果用户开启了"完整 URL 模式"，填入的是如 https://api.xxx.com/v1/chat/completions，
+    # 由于 ChatOpenAI 会在发起请求时自动拼接 /chat/completions，因此传给 ChatOpenAI 的 base_url 需裁掉末尾 /chat/completions 以精确还原用户的完整请求地址。
+    if base_url:
+        base_url = base_url.strip().rstrip("/")
+        if is_full_url == "true" or is_full_url is True:
+            if base_url.endswith("/chat/completions"):
+                base_url = base_url[:-len("/chat/completions")].rstrip("/")
+        else:
+            if base_url.endswith("/chat/completions"):
+                base_url = base_url[:-len("/chat/completions")].rstrip("/")
 
     try:
         from langchain_openai import ChatOpenAI

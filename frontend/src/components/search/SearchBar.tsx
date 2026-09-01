@@ -9,6 +9,7 @@ interface SearchBarProps {
   onBatchSearch: () => void
   onBatchApply: () => void
   loading: boolean
+  isBatchApplying?: boolean
 }
 
 const HR_ACTIVE_OPTIONS = [
@@ -21,7 +22,7 @@ const HR_ACTIVE_OPTIONS = [
   { value: '半年前活跃', label: '半年前活跃' },
 ]
 
-export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: SearchBarProps) {
+export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading, isBatchApplying }: SearchBarProps) {
   const [keyword, setKeyword] = useState('AI Agent')
   const [city, setCity] = useState('淄博')
   const [welfare, setWelfare] = useState('')
@@ -71,17 +72,17 @@ export function SearchBar({ onSearch, onBatchSearch, onBatchApply, loading }: Se
           ))}
           <option value="全国">全国</option>
         </select>
-        <Button variant="primary" size="md" onClick={handleSearch} disabled={loading}>
+        <Button variant="primary" size="md" onClick={handleSearch} disabled={loading || isBatchApplying}>
           <Search size={16} />
           搜索
         </Button>
-        <Button variant="secondary" size="md" onClick={onBatchSearch}>
+        <Button variant="secondary" size="md" onClick={onBatchSearch} disabled={loading || isBatchApplying}>
           <Zap size={16} />
           一键搜索
         </Button>
-        <Button variant="success" size="md" onClick={onBatchApply}>
-          <Send size={16} />
-          一键投递
+        <Button variant="success" size="md" onClick={onBatchApply} disabled={loading || isBatchApplying}>
+          <Send size={16} className={cn(isBatchApplying && 'animate-pulse')} />
+          {isBatchApplying ? '投递中...' : '一键投递'}
         </Button>
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}

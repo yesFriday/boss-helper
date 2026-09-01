@@ -4,6 +4,8 @@ import { STATUS_MAP, STATUS_BADGE_CLASS, HR_ACTIVE_BADGE_CLASS } from '../../lib
 import { cn } from '../../lib/cn'
 import { Button } from '../common/Button'
 
+import { systemApi } from '../../api/system'
+
 interface JobCardProps {
   job: Job
   onApply: (url: string) => void
@@ -16,12 +18,27 @@ export function JobCard({ job, onApply, onAnalyze, onShortlist }: JobCardProps) 
   const status = job.status || (hasUrl ? 'pending' : 'missing_url')
   const title = job.job_title || job.title || '未知'
 
+  const handleOpen = (e: React.MouseEvent) => {
+    if (!job.job_url) return
+    e.preventDefault()
+    e.stopPropagation()
+    systemApi.openUrl(job.job_url).catch(() => {
+      window.open(job.job_url, '_blank', 'noopener,noreferrer')
+    })
+  }
+
   return (
     <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition-colors">
       <div className="flex-1 min-w-0">
         <div className="font-semibold text-sm text-slate-900 mb-1">
           {hasUrl ? (
-            <a href={job.job_url} target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition-colors">
+            <a
+              href={job.job_url}
+              onClick={handleOpen}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:text-blue-800 hover:underline transition-colors cursor-pointer"
+            >
               {title}
             </a>
           ) : (

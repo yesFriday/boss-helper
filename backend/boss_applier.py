@@ -18,6 +18,8 @@ from backend.state import (
     update_application_status,
     add_application,
     get_or_create_conversation,
+    add_message,
+    update_conversation_last_message,
     increment_daily_stat,
 )
 
@@ -53,7 +55,16 @@ class BossApplier(AutomationBase):
         log.info(f"投递: {job_url[:60]}...")
 
         try:
-            self.page.goto(job_url, wait_until="load", timeout=45000)
+            try:
+                self.page.goto(job_url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:
+                if "NS_ERROR_ABORT" in str(e) or "net::ERR_ABORTED" in str(e):
+                    try:
+                        self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+                else:
+                    raise
             pause(1, 2)
 
             if not self.check_page_safety():
@@ -65,6 +76,42 @@ class BossApplier(AutomationBase):
                 if existing and existing["status"] == "pending":
                     update_application_status(existing["id"], "applied")
                 return {"success": True, "message": "已投递过", "already_applied": True}
+
+            # 从详情页提取 HR 真实姓名和岗位信息
+            app_record = get_application_by_url(job_url) or {}
+            hr_name = app_record.get("hr_name", "")
+            hr_company = app_record.get("company", "")
+            job_title = app_record.get("job_title", "")
+            try:
+                page_info = self.page.evaluate("""() => {
+                    const body = (document.body || {}).innerText || '';
+                    const lines = body.split('\\n').map(l => l.trim()).filter(Boolean);
+                    let hrName = '', hrTitle = '', title = '', company = '';
+                    const titleEl = document.querySelector('.job-title, .job-name, .name, [class*="job-name"]');
+                    if (titleEl) title = (titleEl.innerText || '').trim();
+                    const compEl = document.querySelector('.company-name, .company-info a, [class*="company-name"]');
+                    if (compEl) company = (compEl.innerText || '').trim();
+                    for (let i = 0; i < lines.length; i++) {
+                        const l = lines[i];
+                        if (l.includes('HR') || l.includes('招聘者') || l.includes('招聘经理') ||
+                            l.includes('人事') || l.includes('HRBP') || l.includes('猎头')) {
+                            if (i > 0 && lines[i-1].length <= 6 && !/\\d|省|市|区|路|号|招聘|公司|BOSS/.test(lines[i-1])) {
+                                hrName = lines[i-1];
+                            }
+                            hrTitle = l;
+                            break;
+                        }
+                    }
+                    return {hrName, hrTitle, title, company};
+                }""")
+                if page_info.get("hrName") and not hr_name:
+                    hr_name = (page_info.get("hrName") or "").strip()
+                if page_info.get("title") and not job_title:
+                    job_title = (page_info.get("title") or "").strip()
+                if page_info.get("company") and not hr_company:
+                    hr_company = (page_info.get("company") or "").strip()
+            except Exception:
+                pass
 
             # 查找"立即沟通"按钮
             apply_btn = self._find_element(SELECTORS["apply_button"])
@@ -79,6 +126,7 @@ class BossApplier(AutomationBase):
             if not apply_btn:
                 return {"success": False, "message": "未找到投递按钮"}
 
+            # 点击"立即沟通"（触发平台默认第1条打招呼）
             self._safe_click(apply_btn)
             pause(2, 3)
 
@@ -86,29 +134,36 @@ class BossApplier(AutomationBase):
             if self._has_text("已达上限", "沟通人数已用完", "今日次数已用完", "今日沟通次数已用完"):
                 return {"success": False, "message": "BOSS直聘今日沟通次数已用完"}
 
-            # 等待聊天窗口加载
-            log.info("等待聊天窗口加载...")
-            chat_input = self._find_element(SELECTORS["chat_input"], timeout_ms=10000)
-            if not chat_input:
-                log.warning("未找到聊天输入框（等待10秒后），跳过发送招呼语")
-                log.debug(f"当前页面URL: {self.page.url}")
-                log.debug(f"当前页面标题: {self.page.title()}")
-
-            # 发送招呼语
-            greeting_text = greeting or get_setting(
-                "greeting_template",
-                "您好，我对贵公司的{job_title}岗位很感兴趣，请问可以详细了解一下吗？",
-            )
+            # 生成自定义打招呼语（第2条真人个性化消息）
+            from backend.replier import generate_greeting
+            greeting_text = greeting or generate_greeting(job_title or "相关岗位", hr_company or "贵公司")
             greeting_sent = False
+
+            # 1. 尝试在详情页弹出的聊天输入框中发送
+            chat_input = self._find_element(SELECTORS["chat_input"], timeout_ms=3000)
             if chat_input and greeting_text:
-                # 注意：send_message 属于聊天模块的方法。因为 BossChatMonitor 继承自 BossApplier，
-                # 所以实例化后的 self.send_message 会指向聊天模块的实现。这里通过调用 self.send_message
-                # 依然是完全没问题的。
                 greeting_sent = self.send_message(greeting_text)
                 if greeting_sent:
-                    log.info("招呼语已发送")
-                else:
-                    log.warning("招呼语发送失败")
+                    log.info("在详情页弹窗中成功发送自定义招呼语: %s", greeting_text[:40])
+
+            # 2. 如果详情页未弹出输入框，直接前往聊天页面补发自定义招呼语
+            if not greeting_sent and greeting_text:
+                log.info("详情页未内嵌输入框，正在前往聊天页面发送自定义招呼语...")
+                try:
+                    self.page.goto("https://www.zhipin.com/web/geek/chat", wait_until="domcontentloaded", timeout=25000)
+                    pause(1.5, 2.5)
+                    # 点击列表第一项（刚刚发起沟通的 HR）
+                    top_conv = self.page.locator('li[role="listitem"], .friend-content, [class*="chat-item"]').first
+                    if top_conv and top_conv.is_visible():
+                        top_conv.click()
+                        pause(1, 1.5)
+                    chat_input = self._find_element(SELECTORS["chat_input"], timeout_ms=5000)
+                    if chat_input:
+                        greeting_sent = self.send_message(greeting_text)
+                        if greeting_sent:
+                            log.info("在聊天页成功发送自定义招呼语: %s", greeting_text[:40])
+                except Exception as e:
+                    log.warning("在聊天页补发自定义招呼语异常: %s", e)
 
             # 记录到 SQLite
             existing = get_application_by_url(job_url)
@@ -119,51 +174,21 @@ class BossApplier(AutomationBase):
                     update_application_status(existing["id"], "applied")
                 app_id = existing["id"]
             else:
-                app_id = add_application({"title": "", "company": "", "url": job_url})
+                app_id = add_application({"title": job_title, "company": hr_company, "url": job_url})
                 if greeting_sent:
                     update_application_status(app_id, "applied", greeting_text)
                 else:
                     update_application_status(app_id, "applied")
 
-            # 从详情页提取 HR 真实姓名和岗位信息
-            hr_name = ""
-            hr_company = ""
-            job_title = ""
-            try:
-                hr_info = self.page.evaluate("""() => {
-                    const body = (document.body || {}).innerText || '';
-                    const lines = body.split('\\n').map(l => l.trim()).filter(Boolean);
-                    let hrName = '', hrTitle = '';
-                    for (let i = 0; i < lines.length; i++) {
-                        const l = lines[i];
-                        if (l.includes('HR') || l.includes('招聘者') || l.includes('招聘经理') ||
-                            l.includes('人事') || l.includes('HRBP') || l.includes('猎头')) {
-                            if (i > 0 && lines[i-1].length <= 6 && !/\\d|省|市|区|路|号|招聘|公司|BOSS/.test(lines[i-1])) {
-                                hrName = lines[i-1];
-                            }
-                            hrTitle = l;
-                            break;
-                        }
-                    }
-                    return {hrName, hrTitle};
-                }""")
-                hr_name = (hr_info.get("hrName") or "").strip()
-                if not hr_name:
-                    hr_name = ""
-            except Exception:
-                pass
-
-            app_record = get_application_by_url(job_url) or {}
-            hr_name = hr_name or app_record.get("hr_name", "")
-            hr_company = app_record.get("company", "")
-            job_title = app_record.get("job_title", "")
-
-            # 只创建有 HR 名字的会话，避免"未知HR"垃圾数据
+            # 记录会话与消息
             if hr_name and len(hr_name) >= 2:
-                get_or_create_conversation(app_id, hr_name, hr_company, job_title)
+                conv_id = get_or_create_conversation(app_id, hr_name, hr_company, job_title)
+                if conv_id and greeting_sent:
+                    add_message(conv_id, "me", greeting_text, ai_generated=False)
+                    update_conversation_last_message(conv_id, greeting_text, "me", 0)
 
             increment_daily_stat("applications_sent")
-            log.info("投递成功")
+            log.info("投递成功 (HR: %s, 招呼语已发送: %s)", hr_name or "未知", greeting_sent)
             return {"success": True, "message": "投递成功", "application_id": app_id}
 
         except Exception as e:

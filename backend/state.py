@@ -329,6 +329,29 @@ def update_application_status(app_id: int, status: str, greeting_text: Optional[
     db.commit()
 
 
+def delete_application(app_id: int) -> bool:
+    """删除单个投递记录（级联删除关联的会话与消息）"""
+    db = get_db()
+    db.execute("DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE application_id=?)", (app_id,))
+    db.execute("DELETE FROM conversations WHERE application_id=?", (app_id,))
+    cursor = db.execute("DELETE FROM applications WHERE id=?", (app_id,))
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def delete_applications(app_ids: List[int]) -> int:
+    """批量删除投递记录"""
+    if not app_ids:
+        return 0
+    db = get_db()
+    placeholders = ",".join("?" for _ in app_ids)
+    db.execute(f"DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE application_id IN ({placeholders}))", app_ids)
+    db.execute(f"DELETE FROM conversations WHERE application_id IN ({placeholders})", app_ids)
+    cursor = db.execute(f"DELETE FROM applications WHERE id IN ({placeholders})", app_ids)
+    db.commit()
+    return cursor.rowcount
+
+
 def get_today_application_count() -> int:
     row = (
         get_db()

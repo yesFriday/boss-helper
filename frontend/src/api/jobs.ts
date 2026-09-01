@@ -21,4 +21,10 @@ export const jobsApi = {
 
   analyzeJob: (data: { job_url: string; job_title: string; company: string; description: string }) =>
     api.post<AnalyzeResult>('/api/jobs/analyze', data),
+
+  deleteJob: (id: number) =>
+    api.del<{ status: string; deleted_id: number }>(`/api/jobs/${id}`),
+
+  deleteJobsBatch: (jobIds: number[]) =>
+    api.post<{ status: string; deleted_count: number }>('/api/jobs/delete-batch', { job_ids: jobIds }),
 }

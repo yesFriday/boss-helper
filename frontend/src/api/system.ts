@@ -11,4 +11,5 @@ export const systemApi = {
   pauseMonitor: () => api.post('/api/monitor/pause'),
   resumeMonitor: () => api.post('/api/monitor/resume'),
   navigateToChat: () => api.post('/api/system/navigate-chat'),
+  openUrl: (url: string) => api.post<{ status: string }>('/api/system/open-url', { url }),
 }

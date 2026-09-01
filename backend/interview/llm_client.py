@@ -40,8 +40,16 @@ def _load_ai_config() -> Dict[str, str]:
         if key:
             cfg["api_key"] = key
         url = get_setting("ai_base_url")
+        is_full = get_setting("ai_is_full_url", "false") == "true"
         if url:
-            cfg["base_url"] = url
+            u = url.strip().rstrip("/")
+            if is_full:
+                if u.endswith("/chat/completions"):
+                    u = u[:-len("/chat/completions")].rstrip("/")
+            else:
+                if u.endswith("/chat/completions"):
+                    u = u[:-len("/chat/completions")].rstrip("/")
+            cfg["base_url"] = u
         model = get_setting("ai_model")
         if model:
             cfg["model"] = model

@@ -9,6 +9,8 @@ interface JobsState {
   funnel: { pending: number; today: number; replied: number; interview: number }
   appCurrentPage: number
   batchProgress: BatchProgress | null
+  isBatchApplying: boolean
+  batchCancelRequested: boolean
   setSearchJobs: (jobs: Job[]) => void
   setAppJobs: (jobs: Job[]) => void
   setSearchInFlight: (inFlight: boolean) => void
@@ -17,6 +19,9 @@ interface JobsState {
   setFunnel: (f: JobsState['funnel']) => void
   setAppCurrentPage: (page: number) => void
   setBatchProgress: (progress: BatchProgress | null) => void
+  setIsBatchApplying: (applying: boolean) => void
+  requestCancelBatchApply: () => void
+  resetCancelBatchApply: () => void
 }
 
 export const useJobsStore = create<JobsState>((set) => ({
@@ -27,6 +32,8 @@ export const useJobsStore = create<JobsState>((set) => ({
   funnel: { pending: 0, today: 0, replied: 0, interview: 0 },
   appCurrentPage: 1,
   batchProgress: null,
+  isBatchApplying: false,
+  batchCancelRequested: false,
   setSearchJobs: (searchJobs) => set({ searchJobs }),
   setAppJobs: (appJobs) => set({ appJobs }),
   setSearchInFlight: (searchInFlight) => set({ searchInFlight }),
@@ -40,4 +47,7 @@ export const useJobsStore = create<JobsState>((set) => ({
   setFunnel: (funnel) => set({ funnel }),
   setAppCurrentPage: (appCurrentPage) => set({ appCurrentPage }),
   setBatchProgress: (batchProgress) => set({ batchProgress }),
+  setIsBatchApplying: (isBatchApplying) => set({ isBatchApplying }),
+  requestCancelBatchApply: () => set({ batchCancelRequested: true }),
+  resetCancelBatchApply: () => set({ batchCancelRequested: false }),
 }))

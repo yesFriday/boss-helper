@@ -12,9 +12,22 @@ import { shortlistsApi } from '../api/shortlists'
 import { systemApi } from '../api/system'
 import type { Job, AnalyzeResult } from '../api/types'
 import { Search, Square } from 'lucide-react'
+import { cn } from '../lib/cn'
 
 export function SearchPage() {
-  const { searchJobs, searchInFlight, searchStatusMessage, funnel } = useJobsStore()
+  const {
+    searchJobs,
+    searchInFlight,
+    searchStatusMessage,
+    funnel,
+    batchProgress,
+    isBatchApplying,
+    batchCancelRequested,
+    setIsBatchApplying,
+    requestCancelBatchApply,
+    resetCancelBatchApply,
+    setBatchProgress,
+  } = useJobsStore()
   const { settings } = useSettingsStore()
   const { addToast } = useNotificationStore()
   const [analyzeJob, setAnalyzeJob] = useState<Job | null>(null)
@@ -64,26 +77,56 @@ export function SearchPage() {
   }
 
   const handleBatchApply = async () => {
+    if (isBatchApplying) return
     const pending = searchJobs.filter((j) => j.job_url && j.status !== 'applied' && j.status !== 'replied')
     if (!pending.length) {
       addToast('没有待投递的岗位，请先搜索', 'info')
       return
     }
     if (!confirm(`确定投递 ${pending.length} 条？`)) return
+
+    setIsBatchApplying(true)
+    resetCancelBatchApply()
     let done = 0, ok = 0
-    useJobsStore.getState().setBatchProgress({ done: 0, ok: 0, total: pending.length, cancelled: false })
+    setBatchProgress({ done: 0, ok: 0, total: pending.length, cancelled: false })
+
     for (const job of pending) {
+      if (useJobsStore.getState().batchCancelRequested) {
+        addToast(`批量投递已中断停止: ${ok}/${pending.length} 成功`, 'info')
+        setBatchProgress({ done, ok, total: pending.length, cancelled: true })
+        break
+      }
       try {
         const res = await jobsApi.applyJob(job.job_url)
-        if (res.success) ok++
+        if (res.success) {
+          ok++
+          useJobsStore.getState().updateJobStatus(job.job_url, 'applied')
+        }
       } catch {}
       done++
-      useJobsStore.getState().setBatchProgress({ done, ok, total: pending.length, cancelled: false })
+      const isCancelled = useJobsStore.getState().batchCancelRequested
+      setBatchProgress({ done, ok, total: pending.length, cancelled: isCancelled })
+      if (isCancelled) {
+        addToast(`批量投递已中断停止: ${ok}/${pending.length} 成功`, 'info')
+        break
+      }
     }
-    useJobsStore.getState().setBatchProgress({ done, ok, total: pending.length, cancelled: false })
+
+    if (!useJobsStore.getState().batchCancelRequested) {
+      addToast(`批量投递完成: ${ok}/${pending.length} 成功`, 'success')
+    }
+
+    setIsBatchApplying(false)
+    resetCancelBatchApply()
     const jobs = await jobsApi.listJobs({ limit: 50 })
     useJobsStore.getState().setSearchJobs(jobs.jobs || [])
-    addToast(`批量投递完成: ${ok}/${pending.length} 成功`, 'success')
+    const stats = await systemApi.getStats()
+    useJobsStore.getState().setFunnel({
+      pending: stats.pending || 0,
+      today: stats.today_applications || 0,
+      replied: stats.replied || 0,
+      interview: stats.interview || 0,
+    })
   }
 
   const handleApply = async (url: string) => {
@@ -152,6 +195,7 @@ export function SearchPage() {
         onBatchSearch={handleBatchSearch}
         onBatchApply={handleBatchApply}
         loading={searchInFlight}
+        isBatchApplying={isBatchApplying}
       />
 
       {searchStatusMessage && (
@@ -166,6 +210,38 @@ export function SearchPage() {
               停止搜索
             </button>
           )}
+        </div>
+      )}
+
+      {batchProgress && (
+        <div className="mb-4 p-4 bg-blue-50/70 rounded-xl border border-blue-200">
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="flex items-center gap-2">
+              <span className={cn("inline-block w-2 h-2 rounded-full", isBatchApplying ? "bg-blue-600 animate-pulse" : "bg-emerald-500")} />
+              <span className="text-sm font-semibold text-blue-900">
+                {isBatchApplying ? '批量投递进行中' : batchProgress.cancelled ? '投递已中断' : '投递已完成'}
+              </span>
+              <span className="text-xs text-blue-700 ml-1">
+                ({batchProgress.done}/{batchProgress.total} · {batchProgress.ok} 成功)
+              </span>
+            </div>
+            {isBatchApplying && (
+              <button
+                onClick={requestCancelBatchApply}
+                disabled={batchCancelRequested}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Square size={12} className="fill-red-600" />
+                {batchCancelRequested ? '正在中断...' : '停止投递'}
+              </button>
+            )}
+          </div>
+          <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
+            <div
+              className={cn("h-full rounded-full transition-all duration-300", batchProgress.cancelled ? "bg-amber-500" : "bg-blue-600")}
+              style={{ width: `${Math.min(100, Math.round((batchProgress.done / batchProgress.total) * 100))}%` }}
+            />
+          </div>
         </div>
       )}
 
