@@ -619,7 +619,9 @@ class BossChatMonitor(BossApplier):
             return False
 
     def send_resume(self) -> bool:
-        """点击「发简历」按钮，等弹窗后点「发送」确认。"""
+        """点击「发简历」按钮，等弹窗后点「发送」确认。
+        确认弹窗未出现视为失败——绝不能在没有确认发送的情况下返回成功,
+        否则会向HR谎称"简历已发"。"""
         try:
             btn = self._find_element(SELECTORS["resume_attach_btn"], timeout_ms=5000)
             if not btn:
@@ -637,9 +639,14 @@ class BossChatMonitor(BossApplier):
                 log.info("[发简历] 已点发送按钮")
                 return True
 
-            # 兜底：无弹窗但已点击
-            log.info("[发简历] 无弹窗，直接完成")
-            return True
+            # 弹窗未出现 → 发送未完成,必须返回失败并尝试关闭可能残留的弹窗
+            log.warning("[发简历] 未出现确认弹窗,简历未发送")
+            try:
+                self.page.keyboard.press("Escape")
+                pause(0.5, 1)
+            except Exception:
+                pass
+            return False
         except Exception as e:
             log.error(f"send_resume 失败: {e}", exc_info=True)
             return False
@@ -1114,6 +1121,14 @@ class BossChatMonitor(BossApplier):
                 conv_id, hr_message, job_info, style, resume, wechat, agent_ctx=agent_ctx
             )
 
+            # NO_REPLY：LLM 主动判断这条消息不需要回复——不计失败、不发送
+            from backend.agent_loop import NO_REPLY_MARK
+
+            if reply == NO_REPLY_MARK:
+                log.info(f"[监控] LLM判断无需回复，跳过: {matched_conv.get('hr_name')}")
+                task["reply"] = ""
+                return task
+
             # 回复去重：与我方最后一条消息完全相同则重新生成一次，仍相同则跳过本轮
             last_me = task.get("last_me", "")
             if reply and reply == last_me:
@@ -1121,6 +1136,10 @@ class BossChatMonitor(BossApplier):
                 reply, interest, _extra = generate_reply(
                     conv_id, hr_message, job_info, style, resume, wechat, agent_ctx=agent_ctx
                 )
+                if reply == NO_REPLY_MARK:
+                    log.info(f"[监控] 重新生成判断无需回复，跳过: {matched_conv.get('hr_name')}")
+                    task["reply"] = ""
+                    return task
                 if reply and reply == last_me:
                     log.warning("[监控] 重新生成后仍与上一条重复，跳过本轮发送")
                     reply = ""
@@ -1146,12 +1165,16 @@ class BossChatMonitor(BossApplier):
         hr_name = task["hr_name"]
         fail_key = (conv_id, hash(task.get("hr_message") or ""))
 
-        # 重新定位会话再发送
-        if not self.open_conversation_by_name(hr_name):
-            if len(hr_name) > 4:
-                short = re.match(r"^[\u4e00-\u9fff]{2,3}", hr_name)
-                if short:
-                    self.open_conversation_by_name(short.group(0))
+        # 重新定位会话再发送;定位失败则放弃本轮(避免把回复发到错误会话)
+        opened = self.open_conversation_by_name(hr_name)
+        if not opened and len(hr_name) > 4:
+            short = re.match(r"^[\u4e00-\u9fff]{2,3}", hr_name)
+            if short:
+                opened = self.open_conversation_by_name(short.group(0))
+        if not opened:
+            log.warning(f"[监控] 发送前无法定位会话 {hr_name}，放弃本轮发送")
+            self._bump_failure(fail_key)
+            return
 
         log.info(f"[监控] AI回复: {reply[:60]}...")
         if self.send_message(reply):

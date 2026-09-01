@@ -39,11 +39,13 @@ output_parser = PydanticOutputParser(pydantic_object=ReplyOutput)
 SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟通。你要完全以求职者本人的口吻说话。
 
 ## 回复原则
-- 2-4句话，像真人聊天一样自然，偶尔用口语词（呢、嘛、吧）
+- 像真人用手机打字：长度跟随内容——对方说"好的"这种，回一两个词就够；复杂问题最多4句
+- 禁用邮件腔："感谢您的告知""期待您的回复""祝您工作顺利"这类话不要出现
 - 围绕对方岗位信息来聊，HR问技术就答技术，HR闲聊就闲聊
 - 不承诺具体薪资、入职时间
 - 不编造不存在的项目经验
 - 不要每轮自我介绍，不要重复寒暄
+- 如果这条消息不需要回复（对方明确拒绝、纯结束语、再回会显得纠缠），把 reply 字段设为 NO_REPLY
 
 ## 被怀疑是AI时
 - 用极短口语化解：如"？""真人啊""不是啊"
@@ -161,11 +163,11 @@ def generate_reply(
             from backend.agent_loop import run_agent
 
             style_map = {
-                "professional": "语气正式专业",
-                "casual": "语气轻松友好",
-                "enthusiastic": "语气热情积极",
+                "professional": "自然干练，像同事间发工作消息：直接说事，不客套不啰嗦",
+                "casual": "轻松随意，像朋友聊天",
+                "enthusiastic": "热情但不夸张，像对机会很感兴趣的正常人",
             }
-            agent_ctx["style_hint"] = style_map.get(style, "语气正式专业")
+            agent_ctx["style_hint"] = style_map.get(style, "自然干练，像同事间发工作消息：直接说事，不客套不啰嗦")
 
             reply, interest = run_agent(conversation_id, hr_message, agent_ctx)
             return reply, interest, {}
@@ -178,10 +180,10 @@ def generate_reply(
         context = build_reply_context(conversation_id, hr_message, job_info, resume_summary, wechat_id)
 
         style_hint = {
-            "professional": "语气正式专业",
-            "casual": "语气轻松友好",
-            "enthusiastic": "语气热情积极",
-        }.get(style, "语气正式专业")
+            "professional": "自然干练，像同事间发工作消息：直接说事，不客套不啰嗦",
+            "casual": "轻松随意，像朋友聊天",
+            "enthusiastic": "热情但不夸张，像对机会很感兴趣的正常人",
+        }.get(style, "自然干练，像同事间发工作消息：直接说事，不客套不啰嗦")
 
         system_content = (
             SYSTEM_PROMPT.format(format_instructions=output_parser.get_format_instructions())
@@ -216,9 +218,27 @@ def generate_reply(
         if interest not in ("high", "medium", "low"):
             interest = "medium"
 
+        # NO_REPLY 透传（LLM 判断不需要回复）
+        if reply.strip().upper() == "NO_REPLY":
+            from backend.agent_loop import NO_REPLY_MARK
+
+            return NO_REPLY_MARK, interest or "medium", {}
+
         if not reply or len(reply) < 2:
             if not reply:
-                reply = raw
+                # 原始输出疑似结构化内容(JSON/代码块/思考标记)时绝不能直接发给HR
+                stripped = (raw or "").strip()
+                looks_structured = (
+                    stripped.startswith("{")
+                    or stripped.startswith("```")
+                    or stripped.startswith("[")
+                    or '"reply"' in stripped
+                    or "[INTEREST" in stripped
+                )
+                if looks_structured:
+                    log.warning(f"传统模式输出疑似结构化内容，丢弃: {stripped[:80]}")
+                    return "", "", {}
+                reply = stripped
             if len(reply) < 2:
                 return "", "", {}
 

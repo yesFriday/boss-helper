@@ -86,10 +86,10 @@ def _exec_send_resume(ctx: dict) -> str:
         mark_resume_sent(conv_id)
         matched_conv["resume_sent"] = True
         _record(ctx, "send_resume", "简历发送成功")
-        return "简历已成功通过BOSS发送。在你的回复中告知HR已发送。"
+        return "简历已发送成功。用一句简短自然的话告知HR即可（如'发你了，您看下'），别用'已通过BOSS发送'这种书面说法。"
     else:
-        _record(ctx, "send_resume", "简历发送失败（未找到发简历按钮）")
-        return "简历发送失败（可能页面没有找到发简历按钮）。请在你的回复中告知HR稍后再试或让加微信发。"
+        _record(ctx, "send_resume", "简历发送失败（未找到按钮或确认弹窗）")
+        return "简历发送失败（页面未出现确认弹窗，简历没有发出去）。回复HR时不要声称已发送——可以说'我这边发一下，稍等'或引导加微信后发。"
 
 
 def _exec_share_wechat(ctx: dict) -> str:
@@ -107,10 +107,10 @@ def _exec_share_wechat(ctx: dict) -> str:
     success = _call_automation(ctx, "send_wechat", hr_name)
     if success:
         _record(ctx, "share_wechat", "微信名片分享成功")
-        return "微信名片已通过BOSS分享。在你的回复中告知HR（注意：回复里不要含有'微信'这两个字，BOSS会过滤）。"
+        return "名片已分享成功。简短自然地告知HR即可（如'名片发你了'）——注意回复里别出现'微信'两个字，会被BOSS过滤。"
     else:
         _record(ctx, "share_wechat", "微信名片分享失败")
-        return "微信分享失败。请在你的回复中告知HR稍等或换种方式。"
+        return "名片分享失败。回复HR时不要声称已发——可以说'我加你一下'或换个时间再试。"
 
 
 def _exec_share_phone(ctx: dict) -> str:
@@ -132,10 +132,10 @@ def _exec_share_phone(ctx: dict) -> str:
         mark_phone_shared(conv_id)
         matched_conv["phone_shared"] = True
         _record(ctx, "share_phone", "电话分享成功")
-        return "电话已通过BOSS分享。在你的回复中告知HR已发送。"
+        return "电话已分享成功。简短告知HR即可。"
     else:
         _record(ctx, "share_phone", "电话分享失败")
-        return "电话分享失败。请在你的回复中告知HR稍等。"
+        return "电话分享失败。回复HR时不要声称已发，可以说稍后再操作。"
 
 
 def _exec_check_schedule(tool_args: dict, ctx: dict) -> str:
@@ -239,7 +239,7 @@ def _exec_propose_interview(tool_args: dict, ctx: dict) -> str:
 
     if success:
         _record(ctx, "propose_interview", f"面试创建成功: {start_time} ({interview_type})")
-        return f"面试已成功创建: {start_time} ({interview_type})，时长{duration_min}分钟。在你的回复中告知HR已确认。"
+        return f"面试时间已确认: {start_time} ({interview_type})，时长{duration_min}分钟。用自然的话跟HR确认这个时间（如'那咱们就定X号X点，到时候见'）。"
     else:
         _record(ctx, "propose_interview", f"面试创建失败: {err_msg[:80]}")
         # 构建失败回复，附带备选建议

@@ -17,6 +17,11 @@ SELECTORS = {
         'div[contenteditable="true"]',
         '[class*="chat-input"]',
         '[placeholder*="请输入"]',
+        'div.chat-editor',
+        'div.boss-chat-editor',
+        'textarea[class*="chat"]',
+        'textarea[placeholder*="输入"]',
+        'div[class*="input-area"]',
     ],
     "chat_send_button": [
         'button[type="send"]',
@@ -47,16 +52,17 @@ SELECTORS = {
         'svg[class*="close"]',
     ],
     "resume_attach_btn": [
+        # 只匹配工具栏按钮,禁止裸 div/span 文本匹配——否则会点中聊天气泡里的"发简历"字样
         'div.toolbar-btn:has-text("发简历")',
-        'div:has-text("发简历")',
-        'button:has-text("发简历")',
-        'span:has-text("发简历")',
+        '[class*="toolbar"] button:has-text("发简历")',
+        '.chat-input-area button:has-text("发简历")',
     ],
     "resume_confirm_btn": [
+        # 弹窗作用域内的确认按钮优先,裸文本"发送"放最后兜底
         ".btn-sure-v2.btn-confirm",
         ".choose-resume-dialog .btn-confirm",
-        'button:has-text("发送")',
         '.boss-popup__content button:has-text("发送")',
+        '.dialog-wrap button:has-text("发送")',
     ],
     "wechat_share_btn": [
         ".btn-weixin",

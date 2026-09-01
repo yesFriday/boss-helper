@@ -25,7 +25,17 @@ log = get_logger("agent_loop")
 # 历史窗口与滚动摘要阈值
 HISTORY_WINDOW = 12           # 上下文直接展示的最近消息条数
 SUMMARY_TRIGGER_TOTAL = 30    # 会话消息总数超过该值才考虑摘要
-SUMMARY_TRIGGER_UNCOVERED = 20  # 未被摘要覆盖的消息数超过该值才重新生成
+SUMMARY_TRIGGER_UNCOVERED = 20  # 未被摘要覆盖的消息数超过该值才重新生成摘要
+
+# NO_REPLY 哨兵值：LLM 判断这条消息不需要回复时，run_agent 返回该值而不是空串
+# （空串会被监控循环当作"生成失败"计退避，NO_REPLY 是主动决策，不计失败）
+NO_REPLY_MARK = "__NO_REPLY__"
+
+# 拒绝词模式：Agent 输出中出现这些 AI 助手式的拒绝措辞时不发送（空串计入退避）
+REFUSAL_PATTERNS = [
+    "无法提供", "无法回答", "不能回答", "无法帮助", "爱莫能助", "作为AI",
+    "as an AI", "I cannot provide", "I'm sorry, but", "I am unable",
+]
 
 # Agent 专用的精简版 System Prompt
 AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟通。你要完全以求职者本人的口吻说话，绝对不能暴露是AI或工具。
@@ -33,14 +43,21 @@ AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟
 ## 你的身份
 你正在找工作，对对方发布的岗位有兴趣。你的目标是把对话向积极方向推进——了解岗位详情、展示自己的匹配度、自然地把对话引导到面试或交换联系方式。
 
-## 回复风格
-- 2-4句话，像真人聊天一样自然，偶尔用口语词（呢、嘛、吧、哈），但不要每句都用
-- 每次上下文会给出「本次回复风格」，按该风格组织语言
-- 围绕对方岗位信息（公司、岗位名、JD内容）来聊
-- HR问技术就答技术，HR闲聊就闲聊，灵活应对
-- 不要每轮都做自我介绍，不要重复寒暄
-- 不要用"哈哈，我是真人求职者"这种模板化解释——太假了
+## 回复风格（重要）
+- 像真人用手机打字：长度跟随内容走——对方说"好的""收到"这种，你回一两个词就够（"嗯嗯""好嘞""OK"）；只有对方问复杂问题才多说几句，最多4句
+- 用聊天的语气，别用书面语。禁用邮件腔："感谢您的告知""期待您的回复""祝您工作顺利"这类话真人聊天不会说
+- 想到什么说什么，一次说一点。别把想表达的点全部罗列成一大段——真人是分几条消息说的，这里合并成一条也要有停顿感
+- 可以适当用口语词（嗯、呢、吧、哈、得嘞），别刻意堆
+- 称呼自然点，别每句都"您"；对方随意你就随意，对方正式你再正式
+- 别每轮都自我介绍或重复寒暄
 - 如果上下文标注「岗位信息暂缺」，先自然询问岗位方向或请对方介绍，不要装作了解岗位
+
+## 什么时候不回复
+不是每条消息都需要回。以下情况输出 [NO_REPLY]（就这七个字符，别的什么都不要输出）：
+- 对方明确拒绝了（"不合适""不用了""已经招到人了"），回一句简短感谢就够的话除外
+- 对方只是发了系统性的确认、纯表情、或者不需要回应的结束语
+- 继续回复会显得纠缠、打扰的场景
+拿不准要不要回时：如果一句话以内能自然接住，就回；否则不回。
 
 ## 可用工具
 你可以调用以下工具来辅助沟通。工具调用和文字回复可以在同一轮完成。
@@ -156,7 +173,7 @@ def build_agent_context(conversation_id: int, hr_message: str, ctx: dict) -> str
 
     # 8. 待回复的 HR 消息块
     parts.append(f"\nHR刚刚说: {hr_message}")
-    parts.append("\n请根据以上上下文，决定是否需要调用工具，然后输出你的最终回复。")
+    parts.append("\n请根据以上上下文，判断这条消息需不需要回复。需要则决定是否调用工具，然后输出最终回复；不需要则只输出 [NO_REPLY]。")
 
     return "\n".join(parts)
 
@@ -209,9 +226,14 @@ def _parse_final_reply(text: str) -> tuple:
     """
     从 Agent 的最终回复中解析出 reply 文本和 interest 等级。
     支持 [INTEREST: xxx] 标记格式，没有则默认 medium。
+    支持 [NO_REPLY] 标记（LLM 判断不需要回复时输出），返回特殊空标记。
     """
     if not text:
         return "", "medium"
+
+    # NO_REPLY 判断（LLM 决定不回复这条消息）
+    if re.search(r"\[NO_REPLY\]", text, re.IGNORECASE):
+        return NO_REPLY_MARK, "medium"
 
     # 提取 interest 标记（兼容英文/中文冒号、有无空格）
     interest = "medium"
@@ -278,6 +300,12 @@ def run_agent(
         if not tool_calls:
             # 没有工具调用 → LLM 认为已完成，输出最终回复
             reply, interest = _parse_final_reply(response.content or "")
+            if reply and reply != NO_REPLY_MARK:
+                # 拒绝词安全网：Agent 模式输出 AI 助手式拒绝措辞时不发送
+                low = reply.lower()
+                if any(p.lower() in low for p in REFUSAL_PATTERNS):
+                    log.warning(f"[Agent] 检测到拒绝词，丢弃回复: {reply[:60]}")
+                    return "", "medium"
             log.info(f"[Agent] 完成，共{round_num+1}轮，interest={interest}")
             return reply, interest
 
@@ -302,7 +330,7 @@ def run_agent(
         llm_no_tools = get_llm(temperature=0.7)
         force_msg = HumanMessage(
             content="请根据以上所有工具返回的结果和对话上下文，直接输出你的最终回复文字，不要再调用任何工具。"
-            "在回复末尾用 [INTEREST: high/medium/low] 标注HR的兴趣程度。"
+            "如果判断不需要回复，只输出 [NO_REPLY]。否则在回复末尾用 [INTEREST: high/medium/low] 标注HR的兴趣程度。"
         )
         messages.append(force_msg)
         final_response = llm_no_tools.invoke(messages)
