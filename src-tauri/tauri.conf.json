@@ -12,12 +12,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "BOSS直聘智能求职助手",
         "width": 1280,
         "height": 830,
         "resizable": true,
         "fullscreen": false,
-        "visible": true
+        "visible": true,
+        "focus": true,
+        "center": true
       }
     ],
     "security": {

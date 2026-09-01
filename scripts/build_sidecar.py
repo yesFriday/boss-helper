@@ -16,6 +16,11 @@ def main():
     import os
     os.environ["PYINSTALLER_CONFIG_DIR"] = str(pyinstaller_cache)
 
+    temp_dir = project_root.parent / ".cache" / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["TEMP"] = str(temp_dir)
+    os.environ["TMP"] = str(temp_dir)
+
     tauri_binaries_dir = project_root / "src-tauri" / "binaries"
     tauri_binaries_dir.mkdir(parents=True, exist_ok=True)
 
@@ -32,6 +37,7 @@ def main():
         "--distpath", str(tauri_binaries_dir.resolve()),
         "--workpath", str((project_root / "build_temp").resolve()),
         "--specpath", str((project_root / "build_temp").resolve()),
+        "--collect-all=backend",
         "--hidden-import=fastapi",
         "--hidden-import=uvicorn",
         "--hidden-import=uvicorn.logging",
@@ -46,12 +52,6 @@ def main():
         "--hidden-import=uvicorn.lifespan.on",
         "--hidden-import=sqlite3",
         "--hidden-import=playwright",
-        "--hidden-import=backend.app",
-        "--hidden-import=backend.autochat",
-        "--hidden-import=backend.state",
-        "--hidden-import=backend.replier",
-        "--hidden-import=backend.firefox",
-        "--hidden-import=backend.path_config",
         str(project_root / "backend" / "app.py")
     ]
 
