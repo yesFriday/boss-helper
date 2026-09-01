@@ -623,8 +623,25 @@ class BossScraper:
             quote_plus(keyword),
             city_code,
         )
-        self.page.goto(url, wait_until="load", timeout=45000)
-        pause(3, 5)
+        try:
+            self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            if "NS_ERROR_ABORT" in str(e) or "net::ERR_ABORTED" in str(e):
+                log.warning("页面导航触发重定向或中断(通常为跳转或验证)，等待 DOM 就绪: %s", e)
+                try:
+                    self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
+            else:
+                raise
+
+        # 检查是否未登录或触发安全验证
+        if "security-check" in self.page.url:
+            raise RuntimeError("触发了BOSS直聘安全验证，请在浏览器窗口中完成滑块验证后重试")
+        if self._login_prompt_visible() or "ka=header-login" in self.page.url:
+            raise RuntimeError("BOSS直聘登录态已失效或未登录，请在设置中扫码登录")
+
+        pause(2, 4)
         self._scroll_all()
 
         dom_jobs = self._extract_job_cards()
@@ -984,7 +1001,16 @@ class BossScraper:
         """访问详情页，提取岗位描述 + HR/招聘者信息"""
         result = {"description": "", "hr_name": "", "hr_title": ""}
         try:
-            self.page.goto(url, wait_until="load", timeout=45000)
+            try:
+                self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:
+                if "NS_ERROR_ABORT" in str(e) or "net::ERR_ABORTED" in str(e):
+                    try:
+                        self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+                else:
+                    raise
             pause(2, 4)
 
             # ── 提取招聘者信息 ──
