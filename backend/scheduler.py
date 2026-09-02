@@ -61,6 +61,7 @@ class SchedulerDeps:
     get_monitor_paused: Callable[[], bool]
     monitor_alive: Callable[[], bool]
     run_chat_cycle: Callable[[], Awaitable[dict]]
+    wait_monitor_idle: Callable[[], Awaitable[None]]
 
 
 def match_time_range(config: dict, now: Optional[datetime] = None) -> Optional[str]:
@@ -249,6 +250,8 @@ class Scheduler:
 
         was_paused = self.d.get_monitor_paused()
         self.d.set_monitor_paused(True)
+        # 挡板:等进行中的监控周期跑完再开投递,避免与监控抢同一页面
+        await self.d.wait_monitor_idle()
         no_progress = 0
         try:
             while self.enabled:

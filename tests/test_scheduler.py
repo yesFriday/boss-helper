@@ -53,6 +53,9 @@ def make_deps(tmp_settings=None, **overrides):
         events["chat_cycles"] += 1
         return {"new_messages": 0, "replies_sent": 0}
 
+    async def wait_monitor_idle():
+        return None
+
     d = SchedulerDeps(
         get_setting=lambda k, default="": store.get(k, default),
         set_setting=lambda k, v: store.__setitem__(k, v),
@@ -67,6 +70,7 @@ def make_deps(tmp_settings=None, **overrides):
         get_monitor_paused=lambda: events["paused"],
         monitor_alive=overrides.get("monitor_alive", lambda: True),
         run_chat_cycle=overrides.get("run_chat_cycle", run_chat_cycle),
+        wait_monitor_idle=overrides.get("wait_monitor_idle", wait_monitor_idle),
     )
     return d, store, events
 

@@ -33,7 +33,7 @@ from backend.state import (
     increment_daily_stat,
     update_conversation_interest,
 )
-from backend import runtime
+from backend import runtime, browser_ops
 
 log = get_logger("boss_chat_monitor")
 
@@ -762,6 +762,11 @@ class BossChatMonitor(BossApplier):
         if not hasattr(self, "_cycle_lock"):
             self._cycle_lock = asyncio.Lock()
         async with self._cycle_lock:
+            # 前端独占操作(搜索/投递/手动发消息)进行中:让路,本轮不跑,
+            # 避免与其共用 page 抢导航导致标签页来回切换
+            if browser_ops.is_busy():
+                log.debug("[监控] 浏览器被独占操作占用,本轮跳过")
+                return {"checked": 0, "new_messages": 0, "replies_sent": 0}
             return await self._run_cycle_locked()
 
     async def _run_cycle_locked(self) -> dict:

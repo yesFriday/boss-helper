@@ -13,6 +13,7 @@ from playwright.sync_api import Locator
 from backend.firefox import BossScraper, pause
 from backend.logger import get_logger
 from backend.state import init_db, get_setting
+from backend import browser_ops
 
 log = get_logger("automation_base")
 
@@ -132,6 +133,9 @@ class AutomationBase(BossScraper):
         try:
             current_url = self.page.url
             need_navigate = "/web/geek/chat" not in current_url
+            # 前端独占操作(搜索/投递/手动发消息)进行中时不抢导航,只检查登录态
+            if need_navigate and browser_ops.is_busy():
+                return self.check_logged_in()
             try:
                 if need_navigate:
                     self.page.goto("https://www.zhipin.com/web/geek/chat", wait_until="load", timeout=30000)

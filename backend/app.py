@@ -63,6 +63,7 @@ from backend.state import (
 )
 from backend.replier import generate_greeting
 from backend.scheduler import Scheduler, SchedulerDeps
+from backend import browser_ops
 
 # ── FastAPI 应用 ──
 app = FastAPI(title="BOSS直聘自动化控制台", version="1.0.0")
@@ -149,6 +150,7 @@ def _build_scheduler_deps() -> SchedulerDeps:
         get_monitor_paused=lambda: monitor_paused,
         monitor_alive=lambda: monitor_task is not None and not monitor_task.done(),
         run_chat_cycle=lambda: automation.run_chat_monitor_cycle(),
+        wait_monitor_idle=lambda: browser_ops.wait_cycle_done(automation),
     )
 
 
@@ -759,7 +761,9 @@ async def search_jobs(req: SearchRequest):
     try:
         city_code = CITY_MAP.get(req.city, "101280100")
         try:
-            jobs = await _run_pw(automation.search, req.keyword, city_code)
+            # 挡板:独占浏览器,等进行中的监控周期结束,期间监控让路不再发起周期
+            async with browser_ops.browser_op(automation, reason="搜索岗位"):
+                jobs = await _run_pw(automation.search, req.keyword, city_code)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"搜索失败: {e}")
 
@@ -1064,7 +1068,7 @@ async def sync_conversation_messages(conv_id: int):
 
     if browser_sync_lock is None:
         browser_sync_lock = asyncio.Lock()
-    if browser_sync_lock.locked():
+    if browser_sync_lock.locked() or browser_ops.is_busy():
         return {
             "success": False,
             "message": "浏览器正忙，先显示缓存",
@@ -1073,19 +1077,21 @@ async def sync_conversation_messages(conv_id: int):
 
     try:
         async with browser_sync_lock:
-            opened = await asyncio.wait_for(_run_pw(automation.open_conversation_by_name, hr_name), timeout=8)
-            if not opened:
-                return {
-                    "success": False,
-                    "message": f"无法打开 {hr_name} 的会话",
-                    "messages": _clean_messages_for_web(get_messages(conv_id, 100)),
-                }
+            # 挡板:独占浏览器,等进行中的监控周期结束,期间监控让路不再发起周期
+            async with browser_ops.browser_op(automation, reason="同步会话消息"):
+                opened = await asyncio.wait_for(_run_pw(automation.open_conversation_by_name, hr_name), timeout=8)
+                if not opened:
+                    return {
+                        "success": False,
+                        "message": f"无法打开 {hr_name} 的会话",
+                        "messages": _clean_messages_for_web(get_messages(conv_id, 100)),
+                    }
 
-            live_messages = await asyncio.wait_for(_run_pw(automation.read_visible_messages), timeout=5)
-            if live_messages:
-                replace_conversation_messages(conv_id, live_messages)
-                last = live_messages[-1]
-                update_conversation_last_message(conv_id, last.get("content", ""), last.get("sender", "hr"))
+                live_messages = await asyncio.wait_for(_run_pw(automation.read_visible_messages), timeout=5)
+                if live_messages:
+                    replace_conversation_messages(conv_id, live_messages)
+                    last = live_messages[-1]
+                    update_conversation_last_message(conv_id, last.get("content", ""), last.get("sender", "hr"))
     except asyncio.TimeoutError:
         return {
             "success": False,
@@ -1110,12 +1116,13 @@ async def send_manual_message(conv_id: int, req: SendMessageRequest):
     if not hr_name:
         raise HTTPException(status_code=400, detail="会话缺少HR姓名")
 
-    # 先打开对应会话
-    opened = await _run_pw(automation.open_conversation_by_name, hr_name)
-    if not opened:
-        raise HTTPException(status_code=500, detail=f"无法在浏览器中打开 {hr_name} 的会话")
+    # 挡板:打开会话与发送必须原子完成,监控周期插队会把消息发进错误会话
+    async with browser_ops.browser_op(automation, reason="手动发消息"):
+        opened = await _run_pw(automation.open_conversation_by_name, hr_name)
+        if not opened:
+            raise HTTPException(status_code=500, detail=f"无法在浏览器中打开 {hr_name} 的会话")
 
-    browser_ok = await _run_pw(automation.send_message, req.content, False)
+        browser_ok = await _run_pw(automation.send_message, req.content, False)
     if not browser_ok:
         raise HTTPException(status_code=500, detail="浏览器发送失败，本地不会写入这条消息")
 
@@ -1141,7 +1148,9 @@ async def open_conversation_in_browser(conv_id: int):
     hr_name = conv.get("hr_name", "")
     if not hr_name:
         raise HTTPException(status_code=400, detail="会话缺少HR姓名")
-    success = await _run_pw(automation.open_conversation_by_name, hr_name)
+    # 挡板:独占浏览器,等进行中的监控周期结束,期间监控让路不再发起周期
+    async with browser_ops.browser_op(automation, reason="打开会话"):
+        success = await _run_pw(automation.open_conversation_by_name, hr_name)
     return {
         "success": success,
         "message": f"已在浏览器中打开 {hr_name} 的会话" if success else "打开失败",
@@ -1372,7 +1381,9 @@ async def chat_monitor_loop():
             delay = random.randint(min(min_delay, max_delay), max(min_delay, max_delay) + 5)
             await asyncio.sleep(delay)
 
-            if monitor_paused:
+            # 监控暂停或前端独占操作(搜索/投递/手动发消息)进行中:整轮让路,
+            # 心跳照常但保活/周期都跳过,避免抢导航
+            if monitor_paused or browser_ops.is_busy():
                 continue
 
             if not automation:
