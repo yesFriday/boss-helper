@@ -36,7 +36,7 @@ export function SearchPage() {
 
   const handleSearch = async (keyword: string, city: string, welfare?: string, salaryExpect?: number, experienceExpect?: number, excludeHrActive?: string) => {
     useJobsStore.getState().setSearchInFlight(true)
-    useJobsStore.getState().setSearchStatusMessage('<div class="flex items-center gap-2"><span class="animate-spin">⏳</span> 搜索中...</div>')
+    useJobsStore.getState().setSearchStatusMessage('<div class="flex items-center gap-2"><span class="inline-block w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span> 搜索中...</div>')
     try {
       const res = await jobsApi.searchJobs({ keyword, city, welfare, salary_expect: salaryExpect, experience_expect: experienceExpect, exclude_hr_active: excludeHrActive })
       useJobsStore.getState().setSearchStatusMessage(

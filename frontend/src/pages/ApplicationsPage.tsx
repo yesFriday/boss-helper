@@ -347,7 +347,7 @@ export function ApplicationsPage() {
                           <span className="text-xs text-slate-300">-</span>
                         )}
                       </td>
-                      <td className="py-3 px-4"><span className="px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">★ 收藏</span></td>
+                      <td className="py-3 px-4"><span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><Star size={11} className="mr-1 fill-amber-500 text-amber-500" />收藏</span></td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1.5">
                           <button onClick={() => handleApply(s.job_url)} className="text-xs text-blue-600 font-medium hover:bg-blue-50 px-2 py-1 rounded transition-colors cursor-pointer">投递</button>

@@ -86,10 +86,10 @@ def _exec_send_resume(ctx: dict) -> str:
         mark_resume_sent(conv_id)
         matched_conv["resume_sent"] = True
         _record(ctx, "send_resume", "简历发送成功")
-        return "简历已发送成功。用一句简短自然的话告知HR即可（如'发你了，您看下'），别用'已通过BOSS发送'这种书面说法。"
+        return "【系统事件】简历发送成功。请在回复中自然告知HR已发即可。"
     else:
         _record(ctx, "send_resume", "简历发送失败（未找到按钮或确认弹窗）")
-        return "简历发送失败（页面未出现确认弹窗，简历没有发出去）。回复HR时不要声称已发送——可以说'我这边发一下，稍等'或引导加微信后发。"
+        return "【系统事件】简历发送失败（页面未出现确认弹窗）。回复HR时切勿声称已发，可以说稍后发或直接不回复。"
 
 
 def _exec_share_wechat(ctx: dict) -> str:
@@ -107,10 +107,10 @@ def _exec_share_wechat(ctx: dict) -> str:
     success = _call_automation(ctx, "send_wechat", hr_name)
     if success:
         _record(ctx, "share_wechat", "微信名片分享成功")
-        return "名片已分享成功。简短自然地告知HR即可（如'名片发你了'）——注意回复里别出现'微信'两个字，会被BOSS过滤。"
+        return "【系统事件】名片分享成功。请在回复中自然告知HR已发，注意切勿出现'微信'两字。"
     else:
         _record(ctx, "share_wechat", "微信名片分享失败")
-        return "名片分享失败。回复HR时不要声称已发——可以说'我加你一下'或换个时间再试。"
+        return "【系统事件】名片分享失败。回复HR时切勿声称已发。"
 
 
 def _exec_share_phone(ctx: dict) -> str:
@@ -132,10 +132,10 @@ def _exec_share_phone(ctx: dict) -> str:
         mark_phone_shared(conv_id)
         matched_conv["phone_shared"] = True
         _record(ctx, "share_phone", "电话分享成功")
-        return "电话已分享成功。简短告知HR即可。"
+        return "【系统事件】电话分享成功。请在回复中自然告知HR已发即可。"
     else:
         _record(ctx, "share_phone", "电话分享失败")
-        return "电话分享失败。回复HR时不要声称已发，可以说稍后再操作。"
+        return "【系统事件】电话分享失败。回复HR时切勿声称已发。"
 
 
 def _exec_check_schedule(tool_args: dict, ctx: dict) -> str:
