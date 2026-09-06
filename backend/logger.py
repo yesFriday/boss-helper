@@ -5,9 +5,10 @@
 
 import logging
 import sys
-from backend.path_config import get_boss_data_dir
+from logging.handlers import RotatingFileHandler
+from backend.path_config import get_log_dir
 
-LOG_DIR = get_boss_data_dir()
+LOG_DIR = get_log_dir()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "boss.log"
 
@@ -34,8 +35,10 @@ def _setup():
     console.setFormatter(fmt)
     root.addHandler(console)
 
-    # 文件（DEBUG 级别，保留详细日志）
-    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    # 文件（DEBUG 级别，按大小轮转: 单文件 20MB × 保留 5 份，防止无限膨胀）
+    file_handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=20 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(fmt)
     root.addHandler(file_handler)

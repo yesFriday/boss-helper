@@ -39,3 +39,15 @@ def get_boss_data_dir() -> Path:
         
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def get_log_dir() -> Path:
+    """日志目录: 与 bossHelper 项目根平级的 logs 文件夹。"""
+    env_dir = os.environ.get("BOSS_LOG_DIR")
+    if env_dir:
+        d = Path(env_dir).resolve()
+    else:
+        # 项目根 = bossHelper 目录(backend 的上一级),日志与其平级
+        d = Path(__file__).resolve().parent.parent.parent / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
