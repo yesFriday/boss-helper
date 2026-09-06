@@ -60,7 +60,7 @@ def handle_interview_invite(conversation_id: int, hr_message: str, matched_conv:
     if not parsed:
         return False
 
-    _record_interview(conversation_id, parsed, matched_conv, job_info)
+    _record_interview(conversation_id, parsed, matched_conv, job_info, hr_message)
     return True
 
 
@@ -98,9 +98,9 @@ def _detect_invite(hr_message: str) -> dict | None:
     return {"date": date_str, "time": time_str, "type": itype, "notes": (data.get("notes") or "").strip()}
 
 
-def _record_interview(conversation_id: int, parsed: dict, matched_conv: dict, job_info: dict):
-    """冲突校验后写入排期。有冲突则不写入,只记日志。"""
-    from backend.state import validate_and_add_interview
+def _record_interview(conversation_id: int, parsed: dict, matched_conv: dict, job_info: dict, hr_message: str = None):
+    """冲突校验后写入排期。有冲突则转存冲突登记表(conflicted_interviews),不写排期,只记日志。"""
+    from backend.state import validate_and_add_interview, add_conflicted_interview
 
     start_time = f"{parsed['date']} {parsed['time']}"
     notes_parts = []
@@ -118,6 +118,12 @@ def _record_interview(conversation_id: int, parsed: dict, matched_conv: dict, jo
             f"[面试闸门] HR[{hr_name}] 邀约已静默记录: {start_time} ({parsed['type']}) | {company}"
         )
     else:
+        # 冲突: 转存冲突登记表留档(便于后续人工跟进),排期表不写入
+        conflict_id = add_conflicted_interview(
+            conversation_id, parsed["type"], start_time, 60, err_msg,
+            hr_message=hr_message, notes="HR主动提出-静默记录(冲突未入排期)",
+        )
         log.info(
-            f"[面试闸门] HR[{hr_name}] 邀约时间冲突未记录: {start_time} | {err_msg} | {company}"
+            f"[面试闸门] HR[{hr_name}] 邀约时间冲突未记录: {start_time} | {err_msg} | "
+            f"{company} | 已登记冲突表#{conflict_id}"
         )

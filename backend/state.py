@@ -190,6 +190,24 @@ def init_db():
             updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    # 冲突面试登记表: HR 提出的面试邀约因时间冲突未入排期时,转存留档
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS conflicted_interviews (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT,
+            company         TEXT    NOT NULL,
+            job_title       TEXT    NOT NULL,
+            interview_type  TEXT    NOT NULL DEFAULT 'online',
+            interview_date  TEXT,
+            start_time      TEXT,
+            end_time        TEXT,
+            duration_min    INTEGER NOT NULL DEFAULT 60,
+            conflict_reason TEXT,
+            hr_message      TEXT,
+            notes           TEXT,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
     # 默认设置
     defaults = {
         "greeting_template": "你好，贵司{job_title}还在招人吗？想发份简历给您看下，方便吗？",
@@ -1371,6 +1389,57 @@ def validate_and_add_interview(conv_id: int, interview_type: str, start_time_str
     )
     db.commit()
     return True, "成功"
+
+
+def add_conflicted_interview(conv_id: int, interview_type: str, start_time_str: str, duration_min: int, conflict_reason: str, hr_message: str = None, notes: str = None) -> int:
+    """
+    记录一条因冲突未入库的面试邀约(静默闸门专用)。
+    HR 提出的面试时间与已有安排冲突时不写入 interviews,转存此表留档,便于后续人工处理。
+    返回新记录 id。
+    """
+    from datetime import datetime, timedelta
+
+    start_time_str = (start_time_str or "").strip()
+    try:
+        start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M") if len(start_time_str) == 16 \
+            else datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        start_dt = None
+        interview_date = ""
+    else:
+        interview_date = start_dt.strftime("%Y-%m-%d")
+        end_dt = start_dt + timedelta(minutes=duration_min)
+
+    db = get_db()
+    cursor = db.execute(
+        "SELECT hr_company, job_title FROM conversations WHERE id = ?", (conv_id,)
+    )
+    conv = cursor.fetchone()
+    company = conv["hr_company"] if conv and conv["hr_company"] else "未知公司"
+    job_title = conv["job_title"] if conv and conv["job_title"] else "未知岗位"
+
+    cursor = db.execute(
+        """
+        INSERT INTO conflicted_interviews
+            (conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, conflict_reason, hr_message, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            conv_id,
+            company,
+            job_title,
+            interview_type,
+            interview_date,
+            start_dt.strftime("%Y-%m-%d %H:%M:%S") if start_dt else start_time_str,
+            end_dt.strftime("%Y-%m-%d %H:%M:%S") if start_dt else "",
+            duration_min,
+            conflict_reason,
+            hr_message,
+            notes,
+        )
+    )
+    db.commit()
+    return cursor.lastrowid
 
 
 def get_upcoming_interviews(days: int = 3) -> list:
