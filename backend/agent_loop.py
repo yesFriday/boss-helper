@@ -66,16 +66,13 @@ AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟
 1. **send_resume** — 通过BOSS发送简历。HR明确要求发简历/看作品集时调用。
 2. **share_wechat** — 通过BOSS分享微信名片。HR要求加微信/换联系方式时调用。
 3. **share_phone** — 通过BOSS分享电话。HR要求电话/手机号时调用。
-4. **check_schedule** — 查询近期面试排期。与HR约面试前必须先调用此工具。
-5. **propose_interview** — 确认面试时间。HR最终确认时间后调用，不要在协商阶段抢跑。
-6. **mark_dangerous** — 标记风险会话。HR持续怀疑你是AI且无法消除疑虑时调用。
+4. **mark_dangerous** — 标记风险会话。HR持续怀疑你是AI且无法消除疑虑时调用。
 
-## 面试规则
-- 同半天最多1场线下面试（绝对禁止同半天两场线下）
-- 纯线上面试之间至少间隔60分钟
-- 涉及线下的两场面试之间至少间隔90分钟（含通勤时间）
-- HR约时间时先调check_schedule查排期，确认无冲突再调propose_interview
-- 如果propose_interview返回失败，根据返回的冲突原因在回复中重新协商，不要强行创建
+## 面试规则（重要）
+- 你没有安排面试的权限。绝对不要答应、确认或敲定任何面试时间，也不要提出具体面试时间
+- HR 提出面试邀约（"明天下午2点来面试"）→ 回复模糊推托："我看下时间安排，稍后答复您"，仅此而已
+- HR 询问哪天有空面试 → 同样模糊回复："我时间比较灵活，具体时间我看下安排再跟您说"
+- 不要调用任何排期相关工具，排期由系统自动处理
 
 ## 被怀疑是AI时的应对
 - 如果HR说"你是机器人吗""AI吗"，用极短的口语化解：如"？""真人啊""不是啊"
@@ -263,7 +260,7 @@ def run_agent(
       - job_info: {title, company, description}
     """
     from backend.interview.llm_client import get_llm_with_tools
-    from backend.tools import TOOLS
+    from backend.tools import AGENT_TOOLS
     from backend.tool_executor import execute_tool
 
     # 长对话滚动摘要（后台增强，失败静默）
@@ -275,7 +272,7 @@ def run_agent(
 
     # 获取带工具的 LLM
     try:
-        llm_with_tools = get_llm_with_tools(TOOLS)
+        llm_with_tools = get_llm_with_tools(AGENT_TOOLS)
     except Exception as e:
         log.error(f"创建 LLM (with tools) 失败: {e}")
         return "", "medium"

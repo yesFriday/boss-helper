@@ -386,6 +386,7 @@ class SettingsUpdate(BaseModel):
     interview_format: Optional[str] = None  # 面试形式限制 (online/offline/both)
     interview_time_slots: Optional[str] = None  # 面试时间段配置 (JSON格式)
     interview_daily_limit: Optional[str] = None  # 每日面试上限数
+    interview_silent_mode: Optional[str] = None  # 面试邀约静默记录(true/false): HR邀约只记排期不回复
 
 
 # ══════════════════════════════════════

@@ -89,6 +89,7 @@ export function SettingsPage() {
     interview_format: 'both',
     interview_time_slots: '',
     interview_daily_limit: '3',
+    interview_silent_mode: 'true',
   })
 
   useEffect(() => {
@@ -141,6 +142,7 @@ export function SettingsPage() {
         interview_format: s.interview_format || 'both',
         interview_time_slots: s.interview_time_slots || '',
         interview_daily_limit: s.interview_daily_limit || '3',
+        interview_silent_mode: s.interview_silent_mode || 'true',
       })
       useSettingsStore.getState().setAiKeyConfigured(s.ai_key_configured === 'true')
     } catch {}
@@ -169,6 +171,7 @@ export function SettingsPage() {
         interview_format: formData.interview_format,
         interview_time_slots: JSON.stringify(timeSlots),
         interview_daily_limit: formData.interview_daily_limit,
+        interview_silent_mode: formData.interview_silent_mode,
         ai_api_key: formData.ai_api_key,
       })
       addToast('设置已保存', 'success')
@@ -336,6 +339,12 @@ export function SettingsPage() {
         </Field>
         <Field label="每日面试上限">
           <input type="number" value={formData.interview_daily_limit} onChange={(e) => setField('interview_daily_limit', e.target.value)} min={1} max={10} className={inputCls} />
+        </Field>
+        <Field label="面试邀约静默记录" hint="HR 提出具体面试时间时只记录到排期，不自动回复任何消息；关闭后 AI 正常协商面试">
+          <select value={formData.interview_silent_mode} onChange={(e) => setField('interview_silent_mode', e.target.value)} className={inputCls + ' cursor-pointer'}>
+            <option value="true">开启（推荐）</option>
+            <option value="false">关闭</option>
+          </select>
         </Field>
       </Section>
 

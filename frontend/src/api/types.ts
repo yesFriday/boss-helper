@@ -89,6 +89,7 @@ export interface Settings {
   interview_format?: string
   interview_time_slots?: string
   interview_daily_limit?: string
+  interview_silent_mode?: string
 }
 
 export interface AnalyzeResult {

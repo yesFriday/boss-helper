@@ -1130,6 +1130,14 @@ class BossChatMonitor(BossApplier):
             return task
 
         try:
+            # 面试邀约静默闸门: HR 提出具体面试时间的邀约 → 只记录排期,不生成不发送任何回复
+            from backend.interview_gate import handle_interview_invite
+
+            if handle_interview_invite(conv_id, hr_message, matched_conv, task.get("job_info") or {}):
+                log.info(f"[监控] 面试邀约静默处理(不回复): {matched_conv.get('hr_name')}")
+                task["reply"] = ""
+                return task
+
             from backend.replier import generate_reply
 
             job_info = task["job_info"]

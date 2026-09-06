@@ -86,3 +86,9 @@ TOOLS = [
         },
     },
 ]
+
+# Agent 实际可用的工具: 不含 check_schedule / propose_interview。
+# 面试排期由 interview_gate 静默闸门统一处理,Agent 无排期权限(防抢跑/防误确认)。
+AGENT_TOOLS = [
+    t for t in TOOLS if t["function"]["name"] not in ("check_schedule", "propose_interview")
+]
