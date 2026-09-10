@@ -1473,13 +1473,23 @@ def get_upcoming_interviews(days: int = 3) -> list:
 
 
 def get_all_interviews() -> list:
-    """获取所有面试（包括已过去和未来的，按时间倒序）"""
+    """获取所有面试（包括已过去和未来的，默认按时间正序），并关联岗位详情页 URL"""
     db = get_db()
     cursor = db.execute(
         """
-        SELECT id, conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, notes, status
-        FROM interviews
-        ORDER BY start_time DESC
+        SELECT i.id, i.conversation_id, i.company, i.job_title, i.interview_type,
+               i.interview_date, i.start_time, i.end_time, i.duration_min,
+               i.location, i.notes, i.status,
+               COALESCE(
+                   a.job_url,
+                   (SELECT a2.job_url FROM applications a2
+                    WHERE a2.job_title = i.job_title AND a2.company = i.company
+                    ORDER BY a2.id DESC LIMIT 1)
+               ) AS job_url
+        FROM interviews i
+        LEFT JOIN conversations c ON c.id = i.conversation_id
+        LEFT JOIN applications a ON a.id = c.application_id
+        ORDER BY i.interview_date ASC, i.start_time ASC
         """
     )
     return [dict(row) for row in cursor.fetchall()]

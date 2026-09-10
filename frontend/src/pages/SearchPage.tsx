@@ -8,6 +8,8 @@ import { useJobsStore } from '../stores/jobsStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { jobsApi } from '../api/jobs'
+import { settingsApi } from '../api/settings'
+import { apiErrorMessage, ApiError } from '../api/client'
 import { shortlistsApi } from '../api/shortlists'
 import { systemApi } from '../api/system'
 import type { Job, AnalyzeResult } from '../api/types'
@@ -78,19 +80,36 @@ export function SearchPage() {
 
   const handleBatchApply = async () => {
     if (isBatchApplying) return
-    const pending = searchJobs.filter((j) => j.job_url && j.status !== 'applied' && j.status !== 'replied')
+    const pending = searchJobs.filter((j) => j.job_url && (j.status === 'pending' || !j.status))
     if (!pending.length) {
       addToast('没有待投递的岗位，请先搜索', 'info')
       return
     }
     if (!confirm(`确定投递 ${pending.length} 条？`)) return
 
+    // 获取打招呼间隔配置
+    let minDelay = 5
+    let maxDelay = 10
+    try {
+      const s = await settingsApi.getSettings()
+      if (s?.settings) {
+        useSettingsStore.getState().updateSettings(s.settings)
+        if (s.settings.batch_delay_min_sec) minDelay = Math.max(1, parseInt(s.settings.batch_delay_min_sec, 10))
+        if (s.settings.batch_delay_max_sec) maxDelay = Math.max(minDelay, parseInt(s.settings.batch_delay_max_sec, 10))
+      }
+    } catch {
+      const storeSettings = useSettingsStore.getState().settings
+      if (storeSettings.batch_delay_min_sec) minDelay = Math.max(1, parseInt(storeSettings.batch_delay_min_sec, 10))
+      if (storeSettings.batch_delay_max_sec) maxDelay = Math.max(minDelay, parseInt(storeSettings.batch_delay_max_sec, 10))
+    }
+
     setIsBatchApplying(true)
     resetCancelBatchApply()
-    let done = 0, ok = 0
+    let done = 0, ok = 0, stoppedByError = ''
     setBatchProgress({ done: 0, ok: 0, total: pending.length, cancelled: false })
 
-    for (const job of pending) {
+    for (let i = 0; i < pending.length; i++) {
+      const job = pending[i]
       if (useJobsStore.getState().batchCancelRequested) {
         addToast(`批量投递已中断停止: ${ok}/${pending.length} 成功`, 'info')
         setBatchProgress({ done, ok, total: pending.length, cancelled: true })
@@ -101,8 +120,24 @@ export function SearchPage() {
         if (res.success) {
           ok++
           useJobsStore.getState().updateJobStatus(job.job_url, 'applied')
+        } else if (res.status === 'offline' || (res as any).is_offline || (res.message && res.message.includes('下架'))) {
+          useJobsStore.getState().updateJobStatus(job.job_url, 'offline')
+        } else if (res.message && res.message.includes('上限')) {
+          // 自动化层返回的每日上限（HTTP 200 + success:false），继续循环没有意义
+          stoppedByError = res.message
+          addToast(`批量投递已停止: ${stoppedByError}`, 'error')
+          setBatchProgress({ done, ok, total: pending.length, cancelled: true })
+          break
         }
-      } catch {}
+      } catch (e) {
+        // 全局性失败（如达到每日上限）继续循环没有意义，立即终止
+        if (e instanceof ApiError && e.status === 429) {
+          stoppedByError = e.message
+          addToast(`批量投递已停止: ${stoppedByError}`, 'error')
+          setBatchProgress({ done, ok, total: pending.length, cancelled: true })
+          break
+        }
+      }
       done++
       const isCancelled = useJobsStore.getState().batchCancelRequested
       setBatchProgress({ done, ok, total: pending.length, cancelled: isCancelled })
@@ -110,9 +145,33 @@ export function SearchPage() {
         addToast(`批量投递已中断停止: ${ok}/${pending.length} 成功`, 'info')
         break
       }
+
+      // 还有下一个岗位未投递且未中断时，进行随机休眠并在进度条上实时倒计时
+      if (i < pending.length - 1 && !stoppedByError) {
+        const delayTotal = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay
+        for (let remaining = delayTotal; remaining > 0; remaining--) {
+          if (useJobsStore.getState().batchCancelRequested) {
+            break
+          }
+          setBatchProgress({
+            done,
+            ok,
+            total: pending.length,
+            cancelled: false,
+            waitSec: remaining,
+          })
+          await new Promise((r) => setTimeout(r, 1000))
+        }
+        if (useJobsStore.getState().batchCancelRequested) {
+          addToast(`批量投递已中断停止: ${ok}/${pending.length} 成功`, 'info')
+          setBatchProgress({ done, ok, total: pending.length, cancelled: true })
+          break
+        }
+        setBatchProgress({ done, ok, total: pending.length, cancelled: false })
+      }
     }
 
-    if (!useJobsStore.getState().batchCancelRequested) {
+    if (!stoppedByError && !useJobsStore.getState().batchCancelRequested) {
       addToast(`批量投递完成: ${ok}/${pending.length} 成功`, 'success')
     }
 
@@ -135,11 +194,14 @@ export function SearchPage() {
       if (res.success) {
         useJobsStore.getState().updateJobStatus(url, 'applied')
         addToast('投递成功', 'success')
+      } else if (res.status === 'offline' || (res as any).is_offline || (res.message && res.message.includes('下架'))) {
+        useJobsStore.getState().updateJobStatus(url, 'offline')
+        addToast('该岗位已下架', 'info')
       } else {
         addToast(res.message || '投递失败', 'error')
       }
-    } catch {
-      addToast('投递失败', 'error')
+    } catch (e) {
+      addToast(apiErrorMessage(e, '投递失败'), 'error')
     }
   }
 
@@ -219,7 +281,13 @@ export function SearchPage() {
             <div className="flex items-center gap-2">
               <span className={cn("inline-block w-2 h-2 rounded-full", isBatchApplying ? "bg-blue-600 animate-pulse" : "bg-emerald-500")} />
               <span className="text-sm font-semibold text-blue-900">
-                {isBatchApplying ? '批量投递进行中' : batchProgress.cancelled ? '投递已中断' : '投递已完成'}
+                {isBatchApplying
+                  ? batchProgress.waitSec
+                    ? `已投递 ${batchProgress.ok} 条，等待 ${batchProgress.waitSec} 秒投递下一条...`
+                    : '批量投递进行中'
+                  : batchProgress.cancelled
+                  ? '投递已中断'
+                  : '投递已完成'}
               </span>
               <span className="text-xs text-blue-700 ml-1">
                 ({batchProgress.done}/{batchProgress.total} · {batchProgress.ok} 成功)

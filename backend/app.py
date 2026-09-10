@@ -431,7 +431,18 @@ def index():
 
 @app.get("/api/status")
 def get_status():
+    global monitor_task
     browser_ok = automation is not None and automation.page is not None
+    # 自愈兜底：若浏览器在运行、启用了自动回复且未主动暂停，但监控任务已挂掉，则自动重启监控
+    if browser_ok and not monitor_paused and get_setting("auto_reply_enabled", "true") == "true":
+        if monitor_task is None or monitor_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+                monitor_task = loop.create_task(chat_monitor_loop())
+                log.info("[自愈] 检测到后台监控任务挂掉，已自动拉起恢复")
+            except Exception:
+                pass
+
     return {
         "browser_running": browser_ok,
         "auto_reply_enabled": get_setting("auto_reply_enabled", "true") == "true",
@@ -464,8 +475,7 @@ def doctor():
     import sys as _sys
 
     try:
-        _sys.path.insert(0, str(project_root / "interview"))
-        from llm_client import _load_ai_config
+        from backend.interview.llm_client import _load_ai_config
 
         cfg = _load_ai_config()
         ai_key_ok = bool(cfg.get("api_key") and len(cfg["api_key"]) > 10)
@@ -489,6 +499,11 @@ def doctor():
 async def start_automation():
     global automation, monitor_task
     if automation is not None and automation.page is not None:
+        if monitor_task is None or monitor_task.done():
+            monitor_task = asyncio.create_task(chat_monitor_loop())
+            log.info("[系统] 浏览器已存在，已重新拉起后台监控任务")
+            await broadcast_ws({"type": "system", "event": "started"})
+            return {"status": "started", "message": "已重新拉起后台监控"}
         return {"status": "already_started"}
 
     # 在后台线程启动浏览器，避免阻塞事件循环
@@ -597,8 +612,11 @@ async def pause_monitor():
 
 @app.post("/api/monitor/resume")
 async def resume_monitor():
-    global monitor_paused
+    global monitor_paused, monitor_task
     monitor_paused = False
+    if automation and automation.page and (monitor_task is None or monitor_task.done()):
+        monitor_task = asyncio.create_task(chat_monitor_loop())
+        log.info("[监控] 恢复监控并拉起监控任务")
     await broadcast_ws({"type": "monitor_resumed"})
     return {"status": "resumed"}
 
@@ -860,9 +878,18 @@ async def apply_to_job(req: ApplyRequest):
     if get_today_application_count() >= daily_limit:
         raise HTTPException(status_code=429, detail="已达到今日投递上限")
 
+    job = get_application_by_url(req.job_url)
+    if job:
+        status = job.get("status")
+        if status == "offline":
+            return {"success": False, "message": "岗位已下架", "status": "offline", "is_offline": True, "application_id": job.get("id")}
+        if status in ("applied", "replied"):
+            return {"success": True, "message": "已投递过", "already_applied": True, "application_id": job.get("id")}
+        if status and status != "pending":
+            return {"success": False, "message": f"岗位当前状态为「{status}」，非待投递状态", "status": status, "application_id": job.get("id")}
+
     greeting = req.greeting
     if not greeting:
-        job = get_application_by_url(req.job_url)
         title = job["job_title"] if job else "相关岗位"
         company = job["company"] if job else "贵公司"
         style = get_setting("ai_reply_style", "professional")
@@ -878,6 +905,15 @@ async def apply_to_job(req: ApplyRequest):
                 "job_id": result.get("application_id"),
             }
         )
+    elif result.get("status") == "offline" or result.get("is_offline"):
+        await broadcast_ws(
+            {
+                "type": "job_status_changed",
+                "job_url": req.job_url,
+                "status": "offline",
+                "job_id": result.get("application_id"),
+            }
+        )
     return result
 
 
@@ -886,9 +922,15 @@ async def apply_batch(req: ApplyBatchRequest):
     if not automation:
         raise HTTPException(status_code=503, detail="浏览器未启动")
 
+    valid_urls = []
+    for u in req.job_urls:
+        j = get_application_by_url(u)
+        if not j or j.get("status") in ("pending", "", None):
+            valid_urls.append(u)
+
     daily_limit = int(get_setting("daily_apply_limit", "15"))
     remaining = daily_limit - get_today_application_count()
-    urls = req.job_urls[: max(1, remaining)]
+    urls = valid_urls[: max(1, remaining)]
 
     results = await _run_pw(automation.apply_batch, urls, req.greeting)
     await broadcast_ws(
@@ -1348,8 +1390,7 @@ async def chat_monitor_loop():
 
     # 验证 AI 回复系统
     try:
-        sys.path.insert(0, str(project_root / "interview"))
-        from llm_client import _load_ai_config
+        from backend.interview.llm_client import _load_ai_config
 
         cfg = _load_ai_config()
         if cfg["api_key"] and len(cfg["api_key"]) > 10:
@@ -1406,10 +1447,11 @@ async def chat_monitor_loop():
                 await broadcast_ws(
                     {
                         "type": "session_expired",
-                        "message": "BOSS直聘登录已过期，请点击设置Tab的「重新扫码登录」",
+                        "message": "BOSS直聘登录已过期或网络异常，请确认登录状态",
                     }
                 )
-                break
+                await asyncio.sleep(20)
+                continue
 
             # 每轮都轻量保活，避免 BOSS session 超时
             if _heartbeat_count >= 1:
@@ -1444,10 +1486,11 @@ async def chat_monitor_loop():
                 await broadcast_ws(
                     {
                         "type": "safety_warning",
-                        "message": "检测到页面异常(验证码/登录失效/账号限制)，已暂停自动操作。请手动检查浏览器。",
+                        "message": "检测到页面异常(验证码/登录失效/账号限制)，本轮操作已暂停。请在浏览器中完成验证。",
                     }
                 )
-                break
+                await asyncio.sleep(15)
+                continue
 
         except asyncio.CancelledError:
             break

@@ -1,12 +1,16 @@
 const BASE_URL = typeof window !== 'undefined' && location.port !== '8010' ? 'http://127.0.0.1:8010' : ''
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
   }
+}
+
+export function apiErrorMessage(e: unknown, fallback = '请求失败'): string {
+  return e instanceof ApiError && e.message ? e.message : fallback
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

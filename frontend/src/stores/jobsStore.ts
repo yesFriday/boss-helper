@@ -43,6 +43,9 @@ export const useJobsStore = create<JobsState>((set) => ({
       searchJobs: state.searchJobs.map((j) =>
         j.job_url === url ? { ...j, status: status as Job['status'] } : j
       ),
+      appJobs: state.appJobs.map((j) =>
+        j.job_url === url ? { ...j, status: status as Job['status'] } : j
+      ),
     })),
   setFunnel: (funnel) => set({ funnel }),
   setAppCurrentPage: (appCurrentPage) => set({ appCurrentPage }),

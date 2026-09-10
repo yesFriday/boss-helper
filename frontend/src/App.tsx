@@ -3,6 +3,7 @@ import { PageHeader } from './components/layout/PageHeader'
 import { ToastContainer } from './components/common/ToastContainer'
 import { SearchPage } from './pages/SearchPage'
 import { ApplicationsPage } from './pages/ApplicationsPage'
+import { InterviewsPage } from './pages/InterviewsPage'
 import { ChatPage } from './pages/ChatPage'
 import { WechatPage } from './pages/WechatPage'
 import { AutomationPage } from './pages/AutomationPage'
@@ -20,6 +21,7 @@ function App() {
     switch (activeTab) {
       case 'search': return <SearchPage />
       case 'applications': return <ApplicationsPage />
+      case 'interviews': return <InterviewsPage />
       case 'chat': return <ChatPage />
       case 'wechat': return <WechatPage />
       case 'automation': return <AutomationPage />

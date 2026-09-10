@@ -97,13 +97,28 @@ class AutomationBase(BossScraper):
             if self._login_prompt_visible():
                 log.warning("安全检查: 需要重新登录")
                 return False
-            if any(kw in body_lower[:500] for kw in ["验证", "滑块", "拼图", "captcha", "verify"]):
-                log.warning("安全检查: 检测到验证码")
+            # 必须精确检测滑块和验证码提示语，避免“实名验证/微信验证/学历验证”等正常词汇误报
+            captcha_exact_phrases = [
+                "请拖动滑块", "按住滑块", "拖动滑块完成拼图", "向右滑动滑块",
+                "完成安全验证", "安全验证", "点击完成验证", "请完成下方验证"
+            ]
+            if any(kw in body_lower for kw in captcha_exact_phrases):
+                log.warning("安全检查: 检测到验证码/滑块文案")
                 return False
-            if any(kw in body_lower[:500] for kw in ["账号异常", "违规", "限制使用", "冻结"]):
+            # 检查是否有显式的验证码弹窗 DOM
+            try:
+                for sel in ["[class*='dialog-captcha']", "[class*='geetest']", "[class*='nc-container']", ".sec-verify-box", "iframe[src*='verify']"]:
+                    loc = self.page.locator(sel).first
+                    if loc.is_visible():
+                        log.warning(f"安全检查: 检测到验证码弹窗元素 ({sel})")
+                        return False
+            except Exception:
+                pass
+
+            if any(kw in body_lower[:500] for kw in ["账号已被限制", "账号异常已被冻结", "该账号涉嫌违规", "账号已被封禁"]):
                 log.warning("安全检查: 账号异常")
                 return False
-            if any(kw in body_lower[:500] for kw in ["操作太频繁", "稍后再试", "休息一下"]):
+            if any(kw in body_lower[:500] for kw in ["操作过于频繁", "操作太频繁，请稍后再试", "系统检测到频繁操作"]):
                 log.warning("安全检查: 操作频率限制")
                 return False
             return True

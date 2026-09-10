@@ -25,8 +25,6 @@ from backend.state import (
 
 log = get_logger("boss_applier")
 
-MAX_APPLY_PER_DAY = 30
-
 
 class BossApplier(AutomationBase):
     """投递简历业务类"""
@@ -49,8 +47,18 @@ class BossApplier(AutomationBase):
             daily_limit = max_apply_limit
         else:
             daily_limit = int(get_setting("daily_apply_limit", "15"))
-        if today_count >= min(daily_limit, MAX_APPLY_PER_DAY):
-            return {"success": False, "message": f"已达今日上限({today_count}条)"}
+        if today_count >= daily_limit:
+            return {"success": False, "message": f"已达今日上限({daily_limit}条)"}
+
+        existing = get_application_by_url(job_url)
+        if existing and existing.get("status") == "offline":
+            log.info(f"岗位已在库中标记为已下架，跳过投递: {job_url[:60]}")
+            return {"success": False, "message": "岗位已下架", "status": "offline", "is_offline": True}
+        if existing and existing.get("status") in ("applied", "replied"):
+            return {"success": True, "message": "已投递过", "already_applied": True}
+        if existing and existing.get("status") not in ("pending", "", None):
+            log.info(f"岗位非待投递状态({existing.get('status')})，跳过投递: {job_url[:60]}")
+            return {"success": False, "message": f"岗位非待投递状态({existing.get('status')})", "status": existing.get("status")}
 
         log.info(f"投递: {job_url[:60]}...")
 
@@ -70,15 +78,30 @@ class BossApplier(AutomationBase):
             if not self.check_page_safety():
                 return {"success": False, "message": "安全检查未通过"}
 
+            # 优先检查页面是否包含下架/关闭提示
+            is_offline = self._has_text(
+                "该职位已关闭", "职位已关闭", "已停止招聘", "停止招聘",
+                "该职位已下线", "职位已下架", "已暂停招聘", "职位已暂停", "该职位不存在"
+            )
+            if is_offline:
+                if existing:
+                    update_application_status(existing["id"], "offline")
+                    app_id = existing["id"]
+                else:
+                    app_id = add_application({"title": "已下架岗位", "company": "", "url": job_url})
+                    if app_id:
+                        update_application_status(app_id, "offline")
+                log.info(f"检测到页面提示职位已关闭/下线，已标记为已下架(offline): {job_url[:60]}")
+                return {"success": False, "message": "岗位已下架", "status": "offline", "is_offline": True, "application_id": app_id}
+
             # 检查是否已投递
             if self._has_text("已沟通", "继续沟通"):
-                existing = get_application_by_url(job_url)
                 if existing and existing["status"] == "pending":
                     update_application_status(existing["id"], "applied")
                 return {"success": True, "message": "已投递过", "already_applied": True}
 
             # 从详情页提取 HR 真实姓名和岗位信息
-            app_record = get_application_by_url(job_url) or {}
+            app_record = existing or {}
             hr_name = app_record.get("hr_name", "")
             hr_company = app_record.get("company", "")
             job_title = app_record.get("job_title", "")
@@ -124,7 +147,15 @@ class BossApplier(AutomationBase):
                     apply_btn = None
 
             if not apply_btn:
-                return {"success": False, "message": "未找到投递按钮"}
+                if existing:
+                    update_application_status(existing["id"], "offline")
+                    app_id = existing["id"]
+                else:
+                    app_id = add_application({"title": job_title or "已下架岗位", "company": hr_company or "", "url": job_url})
+                    if app_id:
+                        update_application_status(app_id, "offline")
+                log.info(f"未找到投递按钮，已标记为已下架(offline): {job_url[:60]}")
+                return {"success": False, "message": "未找到投递按钮(岗位已下架)", "status": "offline", "is_offline": True, "application_id": app_id}
 
             # 点击"立即沟通"（触发平台默认第1条打招呼）
             self._safe_click(apply_btn)

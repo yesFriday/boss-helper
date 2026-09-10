@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, ClipboardList, MessageSquare, Smartphone, Settings, PanelLeftClose, PanelLeftOpen, Play, Square, Bot, Zap } from 'lucide-react'
+import { Search, ClipboardList, CalendarCheck, MessageSquare, Smartphone, Settings, PanelLeftClose, PanelLeftOpen, Play, Square, Bot, Zap } from 'lucide-react'
 import { useAppStore, type TabType } from '../../stores/appStore'
 import { useSystemStore } from '../../stores/systemStore'
 import { useSchedulerStore } from '../../stores/schedulerStore'
@@ -31,6 +31,7 @@ const navGroups: NavGroup[] = [
     label: '记录',
     items: [
       { tab: 'applications', icon: <ClipboardList size={17} />, label: '投递记录' },
+      { tab: 'interviews', icon: <CalendarCheck size={17} />, label: '面试安排' },
       { tab: 'wechat', icon: <Smartphone size={17} />, label: '微信记录' },
     ],
   },

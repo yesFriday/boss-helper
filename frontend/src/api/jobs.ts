@@ -15,7 +15,7 @@ export const jobsApi = {
   },
 
   applyJob: (jobUrl: string) =>
-    api.post<{ success: boolean; message?: string; application_id?: number }>('/api/jobs/apply', { job_url: jobUrl }),
+    api.post<{ success: boolean; message?: string; application_id?: number; status?: string; is_offline?: boolean }>('/api/jobs/apply', { job_url: jobUrl }),
 
   skipJob: (id: number) => api.post(`/api/jobs/${id}/skip`),
 

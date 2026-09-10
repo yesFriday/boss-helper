@@ -41,6 +41,11 @@ export function useWebSocket() {
           interview: stats.interview || 0,
         })
         break
+      case 'job_status_changed':
+        if (msg.job_url && msg.status) {
+          useJobsStore.getState().updateJobStatus(msg.job_url as string, msg.status as string)
+        }
+        break
       case 'batch_complete': {
         const res = await jobsApi.listJobs({ limit: 50 })
         useJobsStore.getState().setSearchJobs(res.jobs || [])

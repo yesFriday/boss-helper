@@ -60,7 +60,7 @@ export function JobCard({ job, onApply, onAnalyze, onShortlist }: JobCardProps) 
         </div>
       </div>
       <div className="flex gap-2 flex-shrink-0">
-        {(status === 'pending' || status === 'failed') && hasUrl && (
+        {status === 'pending' && hasUrl && (
           <Button variant="primary" size="sm" onClick={() => onApply(job.job_url)}>
             <Send size={12} />
             投递

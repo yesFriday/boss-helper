@@ -12,7 +12,7 @@ export interface Job {
   hr_title: string
   hr_active_time?: string
   description: string
-  status: 'pending' | 'applied' | 'replied' | 'interview' | 'skipped' | 'failed' | 'missing_url'
+  status: 'pending' | 'applied' | 'replied' | 'interview' | 'skipped' | 'failed' | 'missing_url' | 'offline'
 }
 
 export interface Conversation {
@@ -125,4 +125,21 @@ export interface BatchProgress {
   ok: number
   total: number
   cancelled: boolean
+  waitSec?: number
+}
+
+export interface Interview {
+  id: number
+  conversation_id: string
+  company: string
+  job_title: string
+  interview_type: 'online' | 'offline' | string
+  interview_date: string
+  start_time: string
+  end_time: string
+  duration_min: number
+  location?: string | null
+  notes?: string | null
+  status: string
+  job_url?: string | null
 }
