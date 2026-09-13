@@ -144,7 +144,12 @@ WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周�
 
 
 def get_free_halfday_slots(days: int = 5, max_slots: int = 3) -> list:
-    """计算未来 N 天的空闲半时段（如"周四上午"），已约时段自动排除。"""
+    """计算未来 N 天的空闲半时段（如"明天上午""周六全天"），已约/已过去的时段自动排除。
+
+    - 今天的上午过了 12 点、下午过了 18 点后不再对外报（已来不及安排）
+    - 同一天上下午都空闲时合并为"全天"，避免"周六上午、周六下午"这种机械表达
+    - 标签用 今天/明天/周X，贴近真人说话
+    """
     from datetime import datetime, timedelta
 
     from backend.state import get_upcoming_interviews
@@ -155,7 +160,12 @@ def get_free_halfday_slots(days: int = 5, max_slots: int = 3) -> list:
     for offset in range(days):
         day = now + timedelta(days=offset)
         date_str = day.strftime("%Y-%m-%d")
-        label = WEEKDAY_CN[day.weekday()] + ("（今天）" if offset == 0 else "")
+        if offset == 0:
+            label = "今天"
+        elif offset == 1:
+            label = "明天"
+        else:
+            label = WEEKDAY_CN[day.weekday()]
         day_interviews = [u for u in upcoming if (u["start_time"] or "")[:10] == date_str]
 
         def _hour(u):
@@ -166,10 +176,19 @@ def get_free_halfday_slots(days: int = 5, max_slots: int = 3) -> list:
 
         morning_busy = any(_hour(u) < 12 for u in day_interviews)
         afternoon_busy = any(12 <= _hour(u) < 18 for u in day_interviews)
-        if not morning_busy:
-            slots.append(f"{label}上午")
-        if not afternoon_busy:
-            slots.append(f"{label}下午")
+        # 已过去的半场不再对外报
+        if offset == 0 and now.hour >= 12:
+            morning_busy = True
+        if offset == 0 and now.hour >= 18:
+            afternoon_busy = True
+
+        if not morning_busy and not afternoon_busy:
+            slots.append(f"{label}全天")
+        else:
+            if not morning_busy:
+                slots.append(f"{label}上午")
+            if not afternoon_busy:
+                slots.append(f"{label}下午")
         if len(slots) >= max_slots:
             break
     return slots[:max_slots]

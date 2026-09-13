@@ -39,21 +39,40 @@ class TestFreeHalfdaySlots:
     def test_all_free_when_no_interviews(self, monkeypatch):
         monkeypatch.setattr("backend.state.get_upcoming_interviews", lambda days=5: [])
         slots = get_free_halfday_slots(days=3)
-        assert len(slots) >= 3
-        assert all(("上午" in s or "下午" in s) for s in slots)
+        assert len(slots) >= 2
+        # 标签为 今天/明天/周X，粒度为 全天/上午/下午
+        assert all(s.startswith(("今天", "明天", "周一", "周二", "周三", "周四", "周五", "周六", "周日")) for s in slots)
+        assert all(("全天" in s or "上午" in s or "下午" in s) for s in slots)
+        # 同一天不会同时出现上午和下午（已合并为全天）
+        days_seen = [s.replace("全天", "").replace("上午", "").replace("下午", "") for s in slots]
+        assert len(days_seen) == len(set(days_seen))
 
     def test_booked_halfday_excluded(self, monkeypatch):
-        tomorrow = datetime.now() + timedelta(days=1)
         booked = [_mk_upcoming(1, 15)]  # 明天下午一场
         monkeypatch.setattr("backend.state.get_upcoming_interviews", lambda days=5: booked)
         slots = get_free_halfday_slots(days=3)
-        label = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][tomorrow.weekday()]
-        assert f"{label}下午" not in slots
-        assert f"{label}上午" in slots  # 上午仍空闲
+        assert "明天下午" not in slots
+        assert "明天上午" in slots  # 上午仍空闲（独立半场不合并）
+
+    def test_today_elapsed_halfdays_excluded(self, monkeypatch):
+        """今天的上午/下午过了时间点后不应再对外报。"""
+        from datetime import datetime as dt
+        monkeypatch.setattr("backend.state.get_upcoming_interviews", lambda days=5: [])
+        monkeypatch.setattr(ig, "datetime", _FixedNow)
+        slots = get_free_halfday_slots(days=3)
+        assert not any(s.startswith("今天") for s in slots)  # 20点后今天全天已过
+        assert slots[0] == "明天全天"
 
     def test_max_slots(self, monkeypatch):
         monkeypatch.setattr("backend.state.get_upcoming_interviews", lambda days=5: [])
         assert len(get_free_halfday_slots(days=5, max_slots=3)) <= 3
+
+
+class _FixedNow:
+    """替换模块内 datetime，让 now() 返回固定时刻（20:00）。"""
+    @staticmethod
+    def now(tz=None):
+        return datetime(2026, 9, 12, 20, 0)
 
 
 class TestConflictReply:
