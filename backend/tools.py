@@ -17,7 +17,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "share_wechat",
-            "description": "通过BOSS直聘分享求职者的微信名片给HR。仅在HR明确要求加微信、换联系方式、加个V时调用。",
+            "description": "通过BOSS直聘分享求职者的微信名片给HR。仅在HR明确要求加微信、换联系方式、加个V时调用。注意：名片只是发到聊天中，不代表已加为好友；你无法在微信里加好友，加好友由真人后续处理。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -87,8 +87,8 @@ TOOLS = [
     },
 ]
 
-# Agent 实际可用的工具: 不含 check_schedule / propose_interview。
-# 面试排期由 interview_gate 静默闸门统一处理,Agent 无排期权限(防抢跑/防误确认)。
+# Agent 实际可用的工具: 含 check_schedule(查排期报空闲), 不含 propose_interview。
+# 面试邀约由 interview_gate 静默闸门统一记录(防抢跑/防误确认),Agent 无建排期权限。
 AGENT_TOOLS = [
-    t for t in TOOLS if t["function"]["name"] not in ("check_schedule", "propose_interview")
+    t for t in TOOLS if t["function"]["name"] != "propose_interview"
 ]

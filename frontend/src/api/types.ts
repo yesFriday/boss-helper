@@ -73,6 +73,7 @@ export interface Settings {
   greeting_template: string
   ai_reply_style: string
   daily_apply_limit: string
+  max_auto_reply_per_day?: string
   min_reply_delay_sec: string
   max_reply_delay_sec: string
   batch_delay_min_sec: string
@@ -90,6 +91,24 @@ export interface Settings {
   interview_time_slots?: string
   interview_daily_limit?: string
   interview_silent_mode?: string
+}
+
+export interface ConflictedInterview {
+  id: number
+  conversation_id: string
+  company: string
+  job_title: string
+  interview_type: 'online' | 'offline' | string
+  interview_date: string | null
+  start_time: string | null
+  end_time: string | null
+  duration_min: number
+  conflict_reason: string
+  hr_message?: string | null
+  notes?: string | null
+  job_url?: string | null
+  created_at: string
+  hr_name?: string | null
 }
 
 export interface AnalyzeResult {

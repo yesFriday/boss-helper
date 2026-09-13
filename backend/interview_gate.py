@@ -4,8 +4,9 @@
 
 HR 消息进入 AI 回复链路前先过此闸门:
 - HR 主动提出"具体可解析时间"的面试邀约 → 解析时间,经冲突校验后写入 interviews 表,
-  全程不生成、不发送任何回复(静默)
-- 有冲突则不写入,只记日志;无论记录成功与否,调用方都必须静默
+  全程静默不回复
+- 时间冲突 → 不入排期,转存冲突留档表,并回复"两段式改期引导"(说明冲突+报真实
+  空闲时段+以问句收尾);绝不代表本人确认任何时间,最终拍板由求职者本人完成
 - 其余消息(包括不带具体时间的面试意向,如"你哪天有空")放行给正常聊天链路
 
 判定原则: 宁漏勿吞 —— LLM 判定不明确时一律放行,避免把正常聊天静默掉。
@@ -14,6 +15,7 @@ HR 消息进入 AI 回复链路前先过此闸门:
 
 import json
 from datetime import datetime
+from typing import Optional
 
 from backend.logger import get_logger
 
@@ -36,32 +38,153 @@ DETECT_PROMPT = """你是检测器。判断下面这条 BOSS直聘 HR 消息是�
 - 消息只是在聊工作内容、问简历、闲聊 → is_invite 为 false"""
 
 
-def handle_interview_invite(conversation_id: int, hr_message: str, matched_conv: dict, job_info: dict) -> bool:
+def handle_interview_invite(
+    conversation_id: int,
+    hr_message: str,
+    matched_conv: dict,
+    job_info: dict,
+    get_job_url=None,
+) -> Optional[str]:
     """
     检测 HR 消息是否为"提出具体面试时间的邀约"。
 
-    返回 True  → 是邀约: 已尝试记录排期(冲突则跳过),调用方必须静默,不发送任何消息
-    返回 False → 不是邀约(或闸门关闭/异常),走正常聊天链路
+    get_job_url: 可选回调，确认是邀约后调用以获取岗位详情页URL（如点开页面捕获）。
+    只在确认为邀约时才调用，避免对每条消息都执行浏览器动作。
+
+    返回 None    → 不是邀约(或闸门关闭/异常),走正常聊天链路
+    返回 ""      → 是邀约且已静默入排期,调用方必须静默,不发送任何消息
+    返回 非空文本 → 邀约与已有安排冲突,已转存留档;文本为"两段式改期引导回复",
+                    调用方应将其发送给 HR
     """
     from backend.state import get_setting
 
     if get_setting("interview_silent_mode", "true") != "true":
-        return False
+        return None
     if not hr_message or not hr_message.strip():
-        return False
+        return None
 
     try:
         parsed = _detect_invite(hr_message)
     except Exception as e:
         # 检测失败(如未配 API Key)→ 放行,不影响正常聊天
         log.warning(f"[面试闸门] 检测异常,放行走正常聊天: {e}")
-        return False
+        return None
 
     if not parsed:
-        return False
+        return None
 
-    _record_interview(conversation_id, parsed, matched_conv, job_info, hr_message)
-    return True
+    job_url = ""
+    if get_job_url is not None:
+        try:
+            job_url = get_job_url() or ""
+        except Exception as e:
+            log.debug(f"[面试闸门] 获取岗位链接失败: {e}")
+    if job_url:
+        try:
+            from backend.state import update_conversation_job_context
+
+            update_conversation_job_context(conversation_id, job_url=job_url)
+            matched_conv["job_url"] = job_url
+        except Exception:
+            pass
+
+    success, err_msg, conflict_id = _record_interview(
+        conversation_id, parsed, matched_conv, job_info, hr_message, job_url
+    )
+    if success:
+        return ""  # 已入排期 → 静默
+    return _build_conflict_reply()  # 冲突 → 两段式改期引导
+
+
+def _record_interview(
+    conversation_id: int,
+    parsed: dict,
+    matched_conv: dict,
+    job_info: dict,
+    hr_message: str = None,
+    job_url: str = "",
+) -> tuple:
+    """冲突校验后写入排期。有冲突则转存冲突登记表(conflicted_interviews),不写排期。
+
+    返回 (success, err_msg, conflict_id)。
+    """
+    from backend.state import validate_and_add_interview, add_conflicted_interview
+
+    start_time = f"{parsed['date']} {parsed['time']}"
+    notes_parts = []
+    if parsed["notes"]:
+        notes_parts.append(parsed["notes"])
+    notes_parts.append("HR主动提出-静默记录(系统未回复)")
+    notes = " | ".join(notes_parts)
+
+    success, err_msg = validate_and_add_interview(
+        conversation_id, parsed["type"], start_time, 60, notes, job_url=job_url
+    )
+
+    hr_name = (matched_conv or {}).get("hr_name") or "?"
+    company = (job_info or {}).get("company") or (matched_conv or {}).get("hr_company") or "?"
+    if success:
+        log.info(
+            f"[面试闸门] HR[{hr_name}] 邀约已静默记录: {start_time} ({parsed['type']}) | {company} | 岗位链接={'有' if job_url else '无'}"
+        )
+        return True, "", None
+    # 冲突: 转存冲突登记表留档(便于后续人工跟进),排期表不写入
+    conflict_id = add_conflicted_interview(
+        conversation_id, parsed["type"], start_time, 60, err_msg,
+        hr_message=hr_message, notes="HR主动提出-静默记录(冲突未入排期)", job_url=job_url,
+    )
+    log.info(
+        f"[面试闸门] HR[{hr_name}] 邀约时间冲突未记录: {start_time} | {err_msg} | "
+        f"{company} | 已登记冲突表#{conflict_id}"
+    )
+    return False, err_msg, conflict_id
+
+
+WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+
+def get_free_halfday_slots(days: int = 5, max_slots: int = 3) -> list:
+    """计算未来 N 天的空闲半时段（如"周四上午"），已约时段自动排除。"""
+    from datetime import datetime, timedelta
+
+    from backend.state import get_upcoming_interviews
+
+    now = datetime.now()
+    upcoming = get_upcoming_interviews(days=days)
+    slots = []
+    for offset in range(days):
+        day = now + timedelta(days=offset)
+        date_str = day.strftime("%Y-%m-%d")
+        label = WEEKDAY_CN[day.weekday()] + ("（今天）" if offset == 0 else "")
+        day_interviews = [u for u in upcoming if (u["start_time"] or "")[:10] == date_str]
+
+        def _hour(u):
+            try:
+                return datetime.strptime((u["start_time"] or "")[:16], "%Y-%m-%d %H:%M").hour
+            except Exception:
+                return 10  # 解析失败按上午占用处理，宁可少报时段
+
+        morning_busy = any(_hour(u) < 12 for u in day_interviews)
+        afternoon_busy = any(12 <= _hour(u) < 18 for u in day_interviews)
+        if not morning_busy:
+            slots.append(f"{label}上午")
+        if not afternoon_busy:
+            slots.append(f"{label}下午")
+        if len(slots) >= max_slots:
+            break
+    return slots[:max_slots]
+
+
+def _build_conflict_reply() -> str:
+    """两段式改期引导：说明冲突 + 报真实空闲时段 + 问句收尾。
+
+    确定性模板(不走 LLM)，空闲时段来自真实排期，绝不编造；
+    不出现任何确认性措辞，最终时间由 HR 选择、求职者本人拍板。
+    """
+    slots = get_free_halfday_slots()
+    if slots:
+        return f"不好意思，这个时间我这边已经有安排了。{'、'.join(slots)}我都有空，您看哪个时间方便？"
+    return "不好意思，这个时间我这边已经有安排了。您看下周什么时间方便？我这边时间好协调。"
 
 
 def _detect_invite(hr_message: str) -> dict | None:
@@ -96,34 +219,3 @@ def _detect_invite(hr_message: str) -> dict | None:
 
     itype = "offline" if data.get("type") == "offline" else "online"
     return {"date": date_str, "time": time_str, "type": itype, "notes": (data.get("notes") or "").strip()}
-
-
-def _record_interview(conversation_id: int, parsed: dict, matched_conv: dict, job_info: dict, hr_message: str = None):
-    """冲突校验后写入排期。有冲突则转存冲突登记表(conflicted_interviews),不写排期,只记日志。"""
-    from backend.state import validate_and_add_interview, add_conflicted_interview
-
-    start_time = f"{parsed['date']} {parsed['time']}"
-    notes_parts = []
-    if parsed["notes"]:
-        notes_parts.append(parsed["notes"])
-    notes_parts.append("HR主动提出-静默记录(系统未回复)")
-    notes = " | ".join(notes_parts)
-
-    success, err_msg = validate_and_add_interview(conversation_id, parsed["type"], start_time, 60, notes)
-
-    hr_name = (matched_conv or {}).get("hr_name") or "?"
-    company = (job_info or {}).get("company") or (matched_conv or {}).get("hr_company") or "?"
-    if success:
-        log.info(
-            f"[面试闸门] HR[{hr_name}] 邀约已静默记录: {start_time} ({parsed['type']}) | {company}"
-        )
-    else:
-        # 冲突: 转存冲突登记表留档(便于后续人工跟进),排期表不写入
-        conflict_id = add_conflicted_interview(
-            conversation_id, parsed["type"], start_time, 60, err_msg,
-            hr_message=hr_message, notes="HR主动提出-静默记录(冲突未入排期)",
-        )
-        log.info(
-            f"[面试闸门] HR[{hr_name}] 邀约时间冲突未记录: {start_time} | {err_msg} | "
-            f"{company} | 已登记冲突表#{conflict_id}"
-        )

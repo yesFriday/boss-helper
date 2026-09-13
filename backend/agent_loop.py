@@ -8,6 +8,7 @@ Agent 主循环 —— ReAct 模式的 think→act→observe 循环。
 
 import re
 from datetime import datetime
+from typing import Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
@@ -36,6 +37,74 @@ REFUSAL_PATTERNS = [
     "无法提供", "无法回答", "不能回答", "无法帮助", "爱莫能助", "作为AI",
     "as an AI", "I cannot provide", "I'm sorry, but", "I am unable",
 ]
+
+# 虚构动作模式：回复中声称执行了工具箱之外的动作（微信加好友/通过申请/拨打电话等）。
+# 这些动作机器人无法完成，说了 HR 会一直等——命中后触发纠正重生成，仍命中则丢弃。
+FABRICATED_ACTION_PATTERNS = [
+    # 微信侧：声称自己加对方（"我加您""我这就加""这就加你""重新加一下"）
+    # 加(?!入|班|油)排除"我愿意加入""我加油"这类合法表述
+    r"(我|这就|这就去|这就来|马上|现在|立刻|直接|重新|再次)[^。？!！\n]{0,4}加(?!入|班|油)",
+    # 声称已发出好友申请（"刚申请了，您看下微信新的朋友"）
+    r"(刚|刚刚|已经)申请了",
+    r"(好友|添加)申请[^。？\n]{0,6}(发出|发送|过去|通过)",
+    # 声称已通过/同意好友申请（"点了同意，您刷新看下""我通过一下"）
+    r"点(了|击)(同意|接受|通过)",
+    r"我通过(一下|了)",
+    r"通过(了)?(您|你|我)?(的)?(好友)?申请",
+    # 电话侧：声称拨出/接听/回拨/挂断电话
+    r"我[^。？\n]{0,3}打(电话|个电话|给您|给你|过去)",
+    r"(我|给您)[^。？\n]{0,2}回(拨|电)",
+    r"(按掉|挂断|挂了)(了|电话|您|你)",
+    r"我(接|接听)(了|听)",
+]
+
+# 命中虚构动作后的纠正重生成指令
+FABRICATION_CORRECTION_PROMPT = (
+    "你刚才的回复声称执行了微信/电话侧的动作（加好友、发或通过好友申请、拨/接/回拨电话等），"
+    "这些动作你根本没有能力完成——你只能通过BOSS平台内的工具（发简历、分享名片）操作，"
+    "微信和电话侧的事情由真人之后在手机上处理。这样回复HR会一直等一个不会发生的动作，严重穿帮。\n"
+    "请重新输出最终回复：不声称任何微信/电话侧动作，"
+    "改为请对方再确认、请对方发联系方式由真人后续处理，或自然引导回平台内沟通。"
+    "其余要求不变；如果不需要回复就只输出 [NO_REPLY]。"
+)
+
+
+def has_fabricated_action_claim(text: str) -> Optional[str]:
+    """检查回复是否声称执行了工具箱之外的动作。命中返回匹配片段，否则返回 None。"""
+    if not text:
+        return None
+    for pattern in FABRICATED_ACTION_PATTERNS:
+        m = re.search(pattern, text)
+        if m:
+            return m.group(0)
+    return None
+
+
+def _guard_fabricated_reply(messages: list, reply: str, interest: str) -> tuple:
+    """出站防线：回复声称无能力动作时，带纠正指令重生成一次；仍命中则丢弃（空串计入退避）。"""
+    hit = has_fabricated_action_claim(reply)
+    if not hit:
+        return reply, interest
+    log.warning(f"[Agent] 回复声称无能力动作({hit})，触发纠正重生成: {reply[:60]}")
+    try:
+        from backend.interview.llm_client import get_llm
+
+        llm_plain = get_llm(temperature=0.3)
+        resp = llm_plain.invoke(messages + [HumanMessage(content=FABRICATION_CORRECTION_PROMPT)])
+        new_reply, new_interest = _parse_final_reply(resp.content or "")
+        if new_reply == NO_REPLY_MARK:
+            return NO_REPLY_MARK, "medium"
+        if not new_reply:
+            return "", "medium"
+        still = has_fabricated_action_claim(new_reply)
+        if still:
+            log.warning(f"[Agent] 纠正后仍声称无能力动作({still})，丢弃: {new_reply[:60]}")
+            return "", "medium"
+        log.info(f"[Agent] 纠正重生成成功: {new_reply[:60]}")
+        return new_reply, new_interest or interest
+    except Exception as e:
+        log.error(f"[Agent] 纠正重生成失败: {e}")
+        return "", "medium"
 
 # Agent 专用的精简版 System Prompt
 AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟通。你要完全以求职者本人的口吻说话，绝对不能暴露是AI或工具。
@@ -75,13 +144,19 @@ AGENT_SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟
 3. **share_phone** — 通过BOSS分享电话。HR要求电话/手机号时调用。
 4. **mark_dangerous** — 标记风险会话。HR持续怀疑你是AI且无法消除疑虑时调用。
 
-## 面试与沟通聚焦（重要）
+## 能力边界（防穿帮，与个人信息红线同级）
+你只能通过BOSS平台内的工具行动：发简历、分享微信名片、分享电话名片。此外你什么也做不了：
+- 微信侧的一切操作（搜索/添加好友、发送或通过好友申请、查看微信消息）你都无法完成，那些只能由真人之后在手机上处理。绝对不要说"我加您""我这就加""刚申请了""我通过了""你刷新看看"——你说了但做不到，HR会一直等一个永远不会发生的动作，严重穿帮。
+- 你不能拨出、接听、回拨电话，也不要说"我打给您""我回拨""我接了""手滑挂了"这类话。
+- 名片/电话分享成功只代表消息送达，不代表对方已经加上。HR说"搜不到你""没收到""加了没反应"时，说明微信侧被拦截或对方未处理：请对方再确认一下、请对方把联系方式发过来由真人后续处理，或自然引导回平台内沟通，绝不声称自己执行了微信/电话侧的动作。
+
+## 面试规则（测试模式：邀约由系统静默记录，唯一铁律是不接受面试）
 - 始终聚焦于岗位详情（工作职责、技术要求）与邀约面试/交换联系方式，积极推进沟通。
-- 岗位聊得合适时，主动表达面谈意愿（"感觉挺合适的，方便约个时间聊聊吗"），把对话往面试引。
-- 但你没有敲定时间的权限：绝对不要答应、确认或提出任何具体面试时间。
-- HR 提出具体面试邀约（"明天下午2点来面试"）→ 回复模糊推托："我看下时间安排，稍后答复您"，仅此而已
-- HR 询问哪天有空面试 → 同样模糊回复："我时间比较灵活，具体时间我看下安排再跟您说"
-- 不要调用任何排期相关工具，排期由系统自动处理
+- HR 提出具体面试时间的邀约（如"明天下午2点来面试"）→ 一律不回复，直接输出 [NO_REPLY]（系统会自动记录这条邀约排期，你不需要也不允许回应或答应它）
+- HR 询问哪天有空或让你提时间（"你哪天方便""这周找时间聊聊"）→ 先调用 check_schedule 查真实排期，再把空闲时间段自然地告诉对方（如"周三下午和周五上午我都有时间"）；必须以查询结果为准，查不到排期就别凭空报时间
+- 【铁律】绝对不要接受、答应或确认 HR 提出的任何具体面试时间（不说"可以/没问题/行/准时到"）；约没约成由系统统一记录处理，你只负责聊岗位和告知空闲时间
+- HR 追问之前提的面试时间怎么安排 → 回复"还在确认，定了第一时间告诉您"，然后可以补充说明自己空闲的时间段
+- 不要调用 propose_interview 等建排期工具，排期记录由系统自动处理
 
 ## 被怀疑是AI时的应对
 - 如果HR说"你是机器人吗""AI吗"，用极短的口语化解：如"？""真人啊""不是啊"
@@ -315,6 +390,8 @@ def run_agent(
                 if any(p.lower() in low for p in REFUSAL_PATTERNS):
                     log.warning(f"[Agent] 检测到拒绝词，丢弃回复: {reply[:60]}")
                     return "", "medium"
+                # 虚构动作防线：声称执行了微信/电话侧等无能力动作时纠正重生成
+                reply, interest = _guard_fabricated_reply(messages, reply, interest)
             log.info(f"[Agent] 完成，共{round_num+1}轮，interest={interest}")
             return reply, interest
 
@@ -343,7 +420,10 @@ def run_agent(
         )
         messages.append(force_msg)
         final_response = llm_no_tools.invoke(messages)
+        messages.append(final_response)
         reply, interest = _parse_final_reply(final_response.content or "")
+        if reply and reply != NO_REPLY_MARK:
+            reply, interest = _guard_fabricated_reply(messages, reply, interest)
         return reply, interest
     except Exception as e:
         log.error(f"[Agent] 强制输出失败: {e}")

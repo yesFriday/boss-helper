@@ -73,6 +73,7 @@ export function SettingsPage() {
     greeting_template: '',
     ai_reply_style: 'professional',
     daily_apply_limit: '15',
+    max_auto_reply_per_day: '200',
     min_reply_delay_sec: '30',
     max_reply_delay_sec: '120',
     batch_delay_min_sec: '30',
@@ -126,6 +127,7 @@ export function SettingsPage() {
         greeting_template: s.greeting_template || '',
         ai_reply_style: s.ai_reply_style || 'professional',
         daily_apply_limit: s.daily_apply_limit || '15',
+        max_auto_reply_per_day: s.max_auto_reply_per_day || '200',
         min_reply_delay_sec: s.min_reply_delay_sec || '30',
         max_reply_delay_sec: s.max_reply_delay_sec || '120',
         batch_delay_min_sec: s.batch_delay_min_sec || '30',
@@ -157,6 +159,7 @@ export function SettingsPage() {
         greeting_template: formData.greeting_template,
         ai_reply_style: formData.ai_reply_style,
         daily_apply_limit: formData.daily_apply_limit,
+        max_auto_reply_per_day: formData.max_auto_reply_per_day,
         min_reply_delay_sec: formData.min_reply_delay_sec,
         max_reply_delay_sec: formData.max_reply_delay_sec,
         batch_delay_min_sec: formData.batch_delay_min_sec,
@@ -257,6 +260,9 @@ export function SettingsPage() {
             <option value="true">开启</option>
             <option value="false">关闭</option>
           </select>
+        </Field>
+        <Field label="每日自动回复上限" hint="每天最多自动回复的消息条数，超出后当天不再自动回复">
+          <input type="number" value={formData.max_auto_reply_per_day} onChange={(e) => setField('max_auto_reply_per_day', e.target.value)} min={1} max={1000} className={inputCls} />
         </Field>
       </Section>
 

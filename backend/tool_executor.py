@@ -107,10 +107,14 @@ def _exec_share_wechat(ctx: dict) -> str:
     success = _call_automation(ctx, "send_wechat", hr_name)
     if success:
         _record(ctx, "share_wechat", "微信名片分享成功")
-        return "【系统事件】名片分享成功。请在回复中自然告知HR已发，注意切勿出现'微信'两字。"
+        return ("【系统事件】名片分享成功（仅表示名片消息已送达聊天，不代表对方已加上好友；"
+                "微信侧加好友由真人后续处理）。请在回复中自然告知HR已发即可，"
+                "切勿出现'微信'两字，也不要说'我加您/我这就加'——你无法在微信里执行任何操作。")
     else:
         _record(ctx, "share_wechat", "微信名片分享失败")
-        return "【系统事件】名片分享失败。回复HR时切勿声称已发。"
+        return ("【系统事件】名片分享失败（页面未出现确认弹窗）。回复HR时切勿声称已发，"
+                "也不要说'我重新加/我再加一次'——你无法在微信里执行任何操作；"
+                "可以说稍后再发，或引导回平台内继续沟通。")
 
 
 def _exec_share_phone(ctx: dict) -> str:
@@ -132,10 +136,10 @@ def _exec_share_phone(ctx: dict) -> str:
         mark_phone_shared(conv_id)
         matched_conv["phone_shared"] = True
         _record(ctx, "share_phone", "电话分享成功")
-        return "【系统事件】电话分享成功。请在回复中自然告知HR已发即可。"
+        return "【系统事件】电话分享成功（仅表示号码消息已送达）。请在回复中自然告知HR已发即可，不要说'我打给您/我回拨'——你无法拨出或接听电话。"
     else:
         _record(ctx, "share_phone", "电话分享失败")
-        return "【系统事件】电话分享失败。回复HR时切勿声称已发。"
+        return "【系统事件】电话分享失败（页面未出现确认弹窗）。回复HR时切勿声称已发，也不要说'我再发一次电话/我打给您'。"
 
 
 def _exec_check_schedule(tool_args: dict, ctx: dict) -> str:

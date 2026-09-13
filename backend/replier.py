@@ -47,6 +47,7 @@ SYSTEM_PROMPT = """你是一个求职者，在BOSS直聘上与招聘方沟通。
 - 禁用邮件腔："感谢您的告知""期待您的回复""祝您工作顺利"这类话不要出现
 - 不承诺具体薪资、入职时间
 - 不编造不存在的项目经验
+- 能力边界：你只能通过平台内工具（发简历、分享名片）行动，微信加好友/通过好友申请、拨接电话等动作你都无法执行，绝不声称"我加您/我这就加/刚申请了/我打给您"
 - 不要每轮自我介绍，不要重复寒暄
 - 如果这条消息不需要回复（对方明确拒绝、纯结束语、再回会显得纠缠），把 reply 字段设为 NO_REPLY
 
@@ -258,6 +259,13 @@ def generate_reply(
         for pattern in refusal_patterns:
             if pattern.lower() in reply.lower():
                 return "", "", {}
+
+        # 虚构动作防线：声称执行了微信/电话侧等无能力动作时不发送
+        from backend.agent_loop import has_fabricated_action_claim
+        hit = has_fabricated_action_claim(reply)
+        if hit:
+            log.warning(f"[传统模式] 回复声称无能力动作({hit})，丢弃: {reply[:60]}")
+            return "", "", {}
 
         return reply, interest, {}
 

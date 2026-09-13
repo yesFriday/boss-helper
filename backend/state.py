@@ -48,8 +48,8 @@ def init_db():
             status TEXT DEFAULT 'pending',                  -- 状态：pending=待投递, applied=已投递, skipped=已跳过
             greeting_text TEXT,                             -- 发送的招呼语内容
             greeting_sent_at TIMESTAMP,                     -- 招呼语发送时间
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 记录创建时间
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
+            created_at TIMESTAMP DEFAULT (datetime('now','localtime')), -- 记录创建时间
+            updated_at TIMESTAMP DEFAULT (datetime('now','localtime'))  -- 最后更新时间
         );
 
         -- 会话表：每个HR的对话记录（一个HR一条记录）
@@ -71,8 +71,8 @@ def init_db():
             resume_sent INTEGER DEFAULT 0,                  -- 是否已发送简历：1=已发送, 0=未发送
             phone_shared INTEGER DEFAULT 0,                 -- 是否已交换电话：1=已交换, 0=未交换
             is_dangerous INTEGER DEFAULT 0,                 -- 是否风险会话：1=已被HR怀疑是AI, 0=正常
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 记录创建时间
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
+            created_at TIMESTAMP DEFAULT (datetime('now','localtime')), -- 记录创建时间
+            updated_at TIMESTAMP DEFAULT (datetime('now','localtime'))  -- 最后更新时间
         );
 
         -- 消息表：每条聊天消息（一个会话有多条消息）
@@ -83,14 +83,14 @@ def init_db():
             content TEXT NOT NULL,                          -- 消息内容
             delivery_status TEXT,                           -- 送达状态：已读/未读/送达/发送失败
             ai_generated INTEGER DEFAULT 0,                 -- 是否AI生成：1=AI生成, 0=人工发送
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 消息时间
+            created_at TIMESTAMP DEFAULT (datetime('now','localtime'))  -- 消息时间
         );
 
         -- 配置表：系统配置项（键值对存储）
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,                           -- 配置项名称
             value TEXT NOT NULL,                            -- 配置项值（JSON字符串）
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- 最后更新时间
+            updated_at TIMESTAMP DEFAULT (datetime('now','localtime'))  -- 最后更新时间
         );
 
         -- 每日统计表：每天的投递和聊天统计
@@ -127,6 +127,10 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     try:
+        db.execute("ALTER TABLE conversations ADD COLUMN job_url TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
         db.execute("ALTER TABLE applications ADD COLUMN hr_active_time TEXT")
     except sqlite3.OperationalError:
         pass
@@ -151,7 +155,7 @@ def init_db():
             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
             tool_name       TEXT NOT NULL,
             result_summary  TEXT NOT NULL,
-            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at      TIMESTAMP DEFAULT (datetime('now','localtime'))
         );
     """)
     # 候选池表
@@ -164,7 +168,7 @@ def init_db():
             salary TEXT,
             city TEXT,
             note TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT (datetime('now','localtime'))
         );
     """)
     # 面试安排表
@@ -186,10 +190,15 @@ def init_db():
             contact_phone   TEXT,
             status          TEXT    NOT NULL DEFAULT 'pending',
             notes           TEXT,
-            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            job_url         TEXT,
+            created_at      TIMESTAMP DEFAULT (datetime('now','localtime')),
+            updated_at      TIMESTAMP DEFAULT (datetime('now','localtime'))
         );
     """)
+    try:
+        db.execute("ALTER TABLE interviews ADD COLUMN job_url TEXT")
+    except sqlite3.OperationalError:
+        pass
     # 冲突面试登记表: HR 提出的面试邀约因时间冲突未入排期时,转存留档
     db.executescript("""
         CREATE TABLE IF NOT EXISTS conflicted_interviews (
@@ -205,9 +214,14 @@ def init_db():
             conflict_reason TEXT,
             hr_message      TEXT,
             notes           TEXT,
-            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            job_url         TEXT,
+            created_at      TIMESTAMP DEFAULT (datetime('now','localtime'))
         );
     """)
+    try:
+        db.execute("ALTER TABLE conflicted_interviews ADD COLUMN job_url TEXT")
+    except sqlite3.OperationalError:
+        pass
     # 默认设置
     defaults = {
         "greeting_template": "你好，贵司{job_title}还在招人吗？想发份简历给您看下，方便吗？",
@@ -241,6 +255,26 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # 时区统一迁移 v1: 历史时间戳从 UTC 统一为本地时间(+8)。只执行一次。
+    row = db.execute("SELECT value FROM settings WHERE key='tz_localtime_v1'").fetchone()
+    already = (row['value'] if row is not None and hasattr(row, 'keys') else (row[0] if row else '')) == '1'
+    if not already:
+        ts_columns = {
+            "conversations": ["created_at", "updated_at", "last_message_at", "wechat_shared_at"],
+            "messages": ["created_at"],
+            "applications": ["greeting_sent_at", "created_at", "updated_at"],
+            "tool_events": ["created_at"],
+            "shortlists": ["created_at"],
+            "interviews": ["created_at", "updated_at"],
+            "conflicted_interviews": ["created_at"],
+            "settings": ["updated_at"],
+        }
+        for table, cols in ts_columns.items():
+            for col in cols:
+                db.execute("UPDATE " + table + " SET " + col + "=datetime(" + col + ", '+8 hours') WHERE " + col + " IS NOT NULL")
+        db.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('tz_localtime_v1', '1', datetime('now','localtime'))")
+        db.commit()
+
 
 def _row_to_dict(row) -> Optional[dict]:
     return dict(row) if row else None
@@ -259,8 +293,8 @@ def add_application(job: dict) -> int:
     db = get_db()
     cur = db.execute(
         """INSERT OR IGNORE INTO applications
-           (job_title, company, salary, job_url, city, experience, education, hr_name, hr_title, hr_active_time, description)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (job_title, company, salary, job_url, city, experience, education, hr_name, hr_title, hr_active_time, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), datetime('now','localtime'))""",
         (
             job.get("title", ""),
             job.get("company", ""),
@@ -312,7 +346,7 @@ def update_application_from_job(app_id: int, job: dict) -> Optional[dict]:
     db = get_db()
     db.execute(
         f"""UPDATE applications SET {", ".join(assignments)},
-            updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            updated_at=datetime('now','localtime') WHERE id=?""",
         params,
     )
     db.commit()
@@ -335,13 +369,13 @@ def update_application_status(app_id: int, status: str, greeting_text: Optional[
     db = get_db()
     if greeting_text:
         db.execute(
-            """UPDATE applications SET status=?, greeting_text=?, greeting_sent_at=CURRENT_TIMESTAMP,
-               updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            """UPDATE applications SET status=?, greeting_text=?, greeting_sent_at=datetime('now','localtime'),
+               updated_at=datetime('now','localtime') WHERE id=?""",
             (status, greeting_text, app_id),
         )
     else:
         db.execute(
-            "UPDATE applications SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            "UPDATE applications SET status=?, updated_at=datetime('now','localtime') WHERE id=?",
             (status, app_id),
         )
     db.commit()
@@ -538,8 +572,8 @@ def get_or_create_conversation(
         if row:
             return row["id"]
     cur = db.execute(
-        """INSERT INTO conversations (application_id, hr_name, hr_company, job_title, security_id)
-           VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO conversations (application_id, hr_name, hr_company, job_title, security_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, datetime('now','localtime'), datetime('now','localtime'))""",
         (application_id, name, hr_company, job_title, sid or None),
     )
     db.commit()
@@ -589,8 +623,8 @@ def get_stale_hr_conversations(minutes: int = 10, limit: int = 2) -> List[dict]:
     """孤儿消息兜底扫描：最后一条是 HR 消息且超过 N 分钟未回复的活跃会话。
 
     未读红点一旦被打开即消失，回复失败的消息会"已读未回"且永不再试；
-    本查询从 DB 侧兜底找回这些会话。last_message_at 以 CURRENT_TIMESTAMP(UTC) 存储，
-    与 datetime('now') 同基准。
+    本查询从 DB 侧兜底找回这些会话。last_message_at 以本地时间存储，
+    与 datetime('now','localtime') 同基准。
     """
     return _rows_to_list(
         get_db()
@@ -598,12 +632,25 @@ def get_stale_hr_conversations(minutes: int = 10, limit: int = 2) -> List[dict]:
             """SELECT * FROM conversations
                WHERE status='active' AND auto_reply_enabled=1 AND is_dangerous=0
                  AND last_message_from='hr'
-                 AND last_message_at < datetime('now', ?)
+                 AND last_message_at < datetime('now','localtime', ?)
                ORDER BY last_message_at ASC LIMIT ?""",
             (f"-{int(minutes)} minutes", limit),
         )
         .fetchall()
     )
+
+
+def get_recent_hr_messages(conv_id: int, limit: int = 5) -> list:
+    """取会话中 HR 最近 N 条消息内容列表（窗口身份指纹校验用），最新在前。"""
+    return [
+        row["content"]
+        for row in get_db()
+        .execute(
+            "SELECT content FROM messages WHERE conversation_id=? AND sender='hr' ORDER BY id DESC LIMIT ?",
+            (conv_id, limit),
+        )
+        .fetchall()
+    ]
 
 
 def find_conversation_by_hr_name(hr_name: str) -> Optional[dict]:
@@ -621,8 +668,8 @@ def update_conversation_last_message(conv_id: int, text: str, sender: str, unrea
     db = get_db()
     db.execute(
         """UPDATE conversations SET last_message_text=?, last_message_from=?,
-           last_message_at=CURRENT_TIMESTAMP, unread_count=MAX(0, unread_count+?),
-           updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+           last_message_at=datetime('now','localtime'), unread_count=MAX(0, unread_count+?),
+           updated_at=datetime('now','localtime') WHERE id=?""",
         (text[:200], sender, unread_delta, conv_id),
     )
     db.commit()
@@ -630,7 +677,7 @@ def update_conversation_last_message(conv_id: int, text: str, sender: str, unrea
 
 def update_conversation_status(conv_id: int, status: str):
     get_db().execute(
-        "UPDATE conversations SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE conversations SET status=?, updated_at=datetime('now','localtime') WHERE id=?",
         (status, conv_id),
     )
     get_db().commit()
@@ -638,7 +685,7 @@ def update_conversation_status(conv_id: int, status: str):
 
 def update_conversation_interest(conv_id: int, level: str):
     get_db().execute(
-        "UPDATE conversations SET interest_level=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE conversations SET interest_level=?, updated_at=datetime('now','localtime') WHERE id=?",
         (level, conv_id),
     )
     get_db().commit()
@@ -646,26 +693,26 @@ def update_conversation_interest(conv_id: int, level: str):
 
 def update_conversation_wechat(conv_id: int, wechat_id: str):
     get_db().execute(
-        "UPDATE conversations SET hr_wechat=?, wechat_shared_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE conversations SET hr_wechat=?, wechat_shared_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?",
         (wechat_id, conv_id),
     )
     get_db().commit()
 
 
 def mark_resume_sent(conv_id: int):
-    get_db().execute("UPDATE conversations SET resume_sent=1, updated_at=CURRENT_TIMESTAMP WHERE id=?", (conv_id,))
+    get_db().execute("UPDATE conversations SET resume_sent=1, updated_at=datetime('now','localtime') WHERE id=?", (conv_id,))
     get_db().commit()
 
 
 def mark_phone_shared(conv_id: int):
-    get_db().execute("UPDATE conversations SET phone_shared=1, updated_at=CURRENT_TIMESTAMP WHERE id=?", (conv_id,))
+    get_db().execute("UPDATE conversations SET phone_shared=1, updated_at=datetime('now','localtime') WHERE id=?", (conv_id,))
     get_db().commit()
 
 
 def mark_conversation_dangerous(conv_id: int):
     """标记会话为风险会话（HR怀疑是AI），后续不再进行AI监听和自动回复。"""
     get_db().execute(
-        "UPDATE conversations SET is_dangerous=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE conversations SET is_dangerous=1, updated_at=datetime('now','localtime') WHERE id=?",
         (conv_id,),
     )
     get_db().commit()
@@ -690,7 +737,7 @@ def get_wechat_exchanges() -> List[dict]:
 
 def set_auto_reply(conv_id: int, enabled: bool):
     get_db().execute(
-        "UPDATE conversations SET auto_reply_enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE conversations SET auto_reply_enabled=?, updated_at=datetime('now','localtime') WHERE id=?",
         (1 if enabled else 0, conv_id),
     )
     get_db().commit()
@@ -706,7 +753,7 @@ def add_message(
 ) -> int:
     db = get_db()
     cur = db.execute(
-        "INSERT INTO messages (conversation_id, sender, content, delivery_status, ai_generated) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO messages (conversation_id, sender, content, delivery_status, ai_generated, created_at) VALUES (?, ?, ?, ?, ?, datetime('now','localtime'))",
         (conversation_id, sender, content, delivery_status, 1 if ai_generated else 0),
     )
     db.commit()
@@ -836,7 +883,7 @@ def replace_conversation_messages(conversation_id: int, messages: List[dict]):
         status = msg["status"]
         ai_generated = 1 if sender == "me" and content in old_ai else 0
         db.execute(
-            "INSERT INTO messages (conversation_id, sender, content, delivery_status, ai_generated) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, sender, content, delivery_status, ai_generated, created_at) VALUES (?, ?, ?, ?, ?, datetime('now','localtime'))",
             (conversation_id, sender, content, status, ai_generated),
         )
 
@@ -883,7 +930,7 @@ def record_tool_event(conversation_id: int, tool_name: str, result_summary: str)
     if not result_summary:
         return
     get_db().execute(
-        "INSERT INTO tool_events (conversation_id, tool_name, result_summary) VALUES (?, ?, ?)",
+        "INSERT INTO tool_events (conversation_id, tool_name, result_summary, created_at) VALUES (?, ?, ?, datetime('now','localtime'))",
         (conversation_id, tool_name, result_summary[:200]),
     )
     get_db().commit()
@@ -987,7 +1034,7 @@ def get_setting(key: str, default: str = "") -> str:
 
 def set_setting(key: str, value: str):
     get_db().execute(
-        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
         (key, value),
     )
     get_db().commit()
@@ -1047,7 +1094,7 @@ def add_to_shortlist(
     db = get_db()
     try:
         cur = db.execute(
-            "INSERT INTO shortlists (job_url, job_title, company, salary, city, note) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO shortlists (job_url, job_title, company, salary, city, note, created_at) VALUES (?,?,?,?,?,?,datetime('now','localtime'))",
             (job_url, title, company, salary, city, note),
         )
         db.commit()
@@ -1090,17 +1137,18 @@ def add_interview(
     contact_name: str = "",
     contact_phone: str = "",
     notes: str = "",
+    job_url: str = "",
 ) -> int:
     db = get_db()
     cur = db.execute(
         """INSERT INTO interviews
            (conversation_id, company, job_title, interview_type, interview_date,
             start_time, end_time, duration_min, location, lat, lng,
-            contact_name, contact_phone, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            contact_name, contact_phone, notes, job_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), datetime('now','localtime'))""",
         (conversation_id, company, job_title, interview_type, interview_date,
          start_time, end_time, duration_min, location, lat, lng,
-         contact_name, contact_phone, notes),
+         contact_name, contact_phone, notes, job_url or ""),
     )
     db.commit()
     return cur.lastrowid
@@ -1146,7 +1194,7 @@ def get_interviews_by_conversation(conversation_id: str) -> List[dict]:
 
 def update_interview_status(interview_id: int, status: str):
     get_db().execute(
-        "UPDATE interviews SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE interviews SET status=?, updated_at=datetime('now','localtime') WHERE id=?",
         (status, interview_id),
     )
     get_db().commit()
@@ -1184,7 +1232,7 @@ def update_interview(
             values.append(val)
     if not fields:
         return
-    fields.append("updated_at=CURRENT_TIMESTAMP")
+    fields.append("updated_at=datetime('now','localtime')")
     values.append(interview_id)
     db.execute(f"UPDATE interviews SET {', '.join(fields)} WHERE id=?", values)
     db.commit()
@@ -1272,7 +1320,7 @@ def _time_overlap(row: dict, block: tuple) -> bool:
     return not (_time_cmp(re, bs) <= 0 or _time_cmp(rs, be) >= 0)
 
 
-def validate_and_add_interview(conv_id: int, interview_type: str, start_time_str: str, duration_min: int, notes: str = None) -> tuple:
+def validate_and_add_interview(conv_id: int, interview_type: str, start_time_str: str, duration_min: int, notes: str = None, job_url: str = None) -> tuple:
     """
     精密校验并添加面试：
     1. 线下互斥：上午(9:00-12:00)最多1场，下午(14:00-18:00)最多1场。
@@ -1363,17 +1411,19 @@ def validate_and_add_interview(conv_id: int, interview_type: str, start_time_str
     # 校验通过，写入数据库
     # 获取会话关联的公司和职位信息
     cursor = db.execute(
-        "SELECT hr_company, job_title FROM conversations WHERE id = ?",
+        "SELECT hr_company, job_title, job_url FROM conversations WHERE id = ?",
         (conv_id,)
     )
     conv = cursor.fetchone()
     company = conv["hr_company"] if conv and conv["hr_company"] else "未知公司"
     job_title = conv["job_title"] if conv and conv["job_title"] else "未知岗位"
-    
+    if job_url is None:
+        job_url = (conv["job_url"] if conv and conv["job_url"] else "") or ""
+
     db.execute(
         """
-        INSERT INTO interviews (conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO interviews (conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, notes, job_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             conv_id,
@@ -1384,14 +1434,15 @@ def validate_and_add_interview(conv_id: int, interview_type: str, start_time_str
             new_start.strftime("%Y-%m-%d %H:%M:%S"),
             new_end.strftime("%Y-%m-%d %H:%M:%S"),
             duration_min,
-            notes
+            notes,
+            job_url or "",
         )
     )
     db.commit()
     return True, "成功"
 
 
-def add_conflicted_interview(conv_id: int, interview_type: str, start_time_str: str, duration_min: int, conflict_reason: str, hr_message: str = None, notes: str = None) -> int:
+def add_conflicted_interview(conv_id: int, interview_type: str, start_time_str: str, duration_min: int, conflict_reason: str, hr_message: str = None, notes: str = None, job_url: str = "") -> int:
     """
     记录一条因冲突未入库的面试邀约(静默闸门专用)。
     HR 提出的面试时间与已有安排冲突时不写入 interviews,转存此表留档,便于后续人工处理。
@@ -1421,8 +1472,8 @@ def add_conflicted_interview(conv_id: int, interview_type: str, start_time_str: 
     cursor = db.execute(
         """
         INSERT INTO conflicted_interviews
-            (conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, conflict_reason, hr_message, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (conversation_id, company, job_title, interview_type, interview_date, start_time, end_time, duration_min, conflict_reason, hr_message, notes, job_url, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
         """,
         (
             conv_id,
@@ -1436,10 +1487,36 @@ def add_conflicted_interview(conv_id: int, interview_type: str, start_time_str: 
             conflict_reason,
             hr_message,
             notes,
+            job_url or "",
         )
     )
     db.commit()
     return cursor.lastrowid
+
+
+def update_conversation_job_context(
+    conv_id: int,
+    hr_company: str = None,
+    job_title: str = None,
+    job_url: str = None,
+) -> None:
+    """回写从聊天页提取的公司/岗位/岗位链接到会话。非空才覆盖，避免用空值冲掉已有数据。"""
+    sets, vals = [], []
+    if hr_company:
+        sets.append("hr_company=?")
+        vals.append(hr_company)
+    if job_title:
+        sets.append("job_title=?")
+        vals.append(job_title)
+    if job_url:
+        sets.append("job_url=?")
+        vals.append(job_url)
+    if not sets:
+        return
+    vals.append(conv_id)
+    db = get_db()
+    db.execute(f"UPDATE conversations SET {', '.join(sets)} WHERE id=?", vals)
+    db.commit()
 
 
 def get_upcoming_interviews(days: int = 3) -> list:
@@ -1481,6 +1558,7 @@ def get_all_interviews() -> list:
                i.interview_date, i.start_time, i.end_time, i.duration_min,
                i.location, i.notes, i.status,
                COALESCE(
+                   i.job_url,
                    a.job_url,
                    (SELECT a2.job_url FROM applications a2
                     WHERE a2.job_title = i.job_title AND a2.company = i.company
@@ -1493,6 +1571,21 @@ def get_all_interviews() -> list:
         """
     )
     return [dict(row) for row in cursor.fetchall()]
+
+
+def get_all_conflicted_interviews() -> list:
+    """获取全部冲突面试邀约留档（静默闸门转存），最新在前。"""
+    cursor = get_db().execute(
+        """
+        SELECT c.id, c.conversation_id, c.company, c.job_title, c.interview_type,
+               c.interview_date, c.start_time, c.end_time, c.duration_min,
+               c.conflict_reason, c.hr_message, c.notes, c.job_url, c.created_at,
+               (SELECT cv.hr_name FROM conversations cv WHERE cv.id = c.conversation_id) AS hr_name
+        FROM conflicted_interviews c
+        ORDER BY c.created_at DESC
+        """
+    )
+    return [dict(r) for r in cursor.fetchall()]
 
 
 def delete_interview(interview_id: int) -> bool:

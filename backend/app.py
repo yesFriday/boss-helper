@@ -370,6 +370,7 @@ class SettingsUpdate(BaseModel):
     greeting_enabled: Optional[str] = None
     ai_reply_style: Optional[str] = None
     daily_apply_limit: Optional[str] = None
+    max_auto_reply_per_day: Optional[str] = None  # 每日自动回复上限数
     auto_reply_enabled: Optional[str] = None
     min_reply_delay_sec: Optional[str] = None
     max_reply_delay_sec: Optional[str] = None
@@ -427,6 +428,110 @@ def index():
 # ══════════════════════════════════════
 #  系统状态
 # ══════════════════════════════════════
+
+
+@app.get("/api/debug/net_sniff")
+async def debug_net_sniff():
+    """诊断接口：旁听聊天页的网络请求/响应，定位 securityId 的真实数据源。
+
+    挂上 Playwright 响应/请求监听 → 重新加载聊天页并滚动列表/打开一个会话 →
+    汇总所有含 securityId 的请求 URL 和响应体片段。只读诊断，不改任何数据。
+    """
+    if automation is None or automation.page is None:
+        return {"error": "浏览器未启动"}
+
+    def _probe():
+        import time
+
+        friend_urls = []
+        friend_meta = []
+        chat_reqs = []
+        chat_resps = []
+
+        def on_response(resp):
+            try:
+                url = resp.url
+                if "getGeekFriendList" in url:
+                    friend_urls.append(url)
+                    data = resp.json()
+                    zp = data.get("zpData") or {}
+                    result = zp.get("result") or []
+                    friend_meta.append(
+                        {
+                            "url": url[:300],
+                            "count": len(result),
+                            "zp_keys": list(zp.keys()),
+                            "first_friend_keys": list(result[0].keys()) if result else [],
+                            "sample_names": [f.get("name") for f in result[:5]],
+                        }
+                    )
+                elif "/zpchat/" in url:
+                    body = resp.text()
+                    if "securityId" in body:
+                        chat_resps.append({"url": url[:250], "body": body[:1500]})
+            except Exception:
+                pass
+
+        def on_request(req):
+            try:
+                url = req.url
+                if "/zpchat/" in url and ("securityId" in url or "friend" in url or "history" in url or "msg" in url):
+                    chat_reqs.append(url[:300])
+            except Exception:
+                pass
+
+        automation.page.on("response", on_response)
+        automation.page.on("request", on_request)
+        try:
+            automation.page.goto("https://www.zhipin.com/web/geek/chat", wait_until="load", timeout=45000)
+            time.sleep(7)
+            try:
+                automation.open_conversation_by_name(
+                    next((c.get("hr_name") for c in automation.poll_conversation_list() if c.get("hr_name")), "")
+                )
+            except Exception:
+                pass
+            time.sleep(4)
+        finally:
+            for evt, fn in (("response", on_response), ("request", on_request)):
+                try:
+                    automation.page.remove_listener(evt, fn)
+                except Exception:
+                    pass
+        return {
+            "friend_list_calls": friend_meta,
+            "chat_requests": list(dict.fromkeys(chat_reqs))[:15],
+            "chat_responses_with_sid": chat_resps[:5],
+        }
+
+    try:
+        return await _run_pw(_probe)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/debug/chat_dom")
+async def debug_chat_dom():
+    """临时调试接口：用 automation 自身方法打开会话后，导出聊天页头部DOM结构。"""
+    if automation is None or automation.page is None:
+        return {"error": "浏览器未启动"}
+
+    def _probe():
+        import time
+
+        convs = automation.poll_conversation_list()
+        name = next((c.get("hr_name") for c in convs if c.get("hr_name")), None)
+        if not name or not automation.open_conversation_by_name(name):
+            return {"error": f"打开会话失败: {name}"}
+        time.sleep(2)
+        info = automation.page.evaluate(automation.EXTRACT_CHAT_CONTEXT_JS, name)
+        info["captured_job_url"] = automation.capture_job_url()
+        return info
+
+    try:
+        return await _run_pw(_probe)
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/status")
@@ -1046,6 +1151,13 @@ def remove_shortlist(sid: int):
 def get_interviews():
     from backend.state import get_all_interviews
     return {"interviews": get_all_interviews()}
+
+
+@app.get("/api/interviews/conflicted")
+def get_conflicted_interviews():
+    """冲突面试邀约留档（静默闸门因时间冲突未入排期的记录）。"""
+    from backend.state import get_all_conflicted_interviews
+    return {"conflicted": get_all_conflicted_interviews()}
 
 
 @app.delete("/api/interviews/{iid}")

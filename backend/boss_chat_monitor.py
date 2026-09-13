@@ -21,6 +21,8 @@ from backend.state import (
     get_conversation_by_security_id,
     update_conversation_security_id,
     get_stale_hr_conversations,
+    get_last_hr_message,
+    get_recent_hr_messages,
     replace_conversation_messages,
     update_conversation_last_message,
     update_conversation_wechat,
@@ -37,7 +39,14 @@ from backend import runtime, browser_ops
 
 log = get_logger("boss_chat_monitor")
 
-MAX_AUTO_REPLY_PER_DAY = 200
+MAX_AUTO_REPLY_PER_DAY = 200  # 默认值，可在前端设置页动态调整（settings key: max_auto_reply_per_day）
+
+
+def get_max_auto_reply_per_day() -> int:
+    try:
+        return max(1, int(get_setting("max_auto_reply_per_day", str(MAX_AUTO_REPLY_PER_DAY))))
+    except (TypeError, ValueError):
+        return MAX_AUTO_REPLY_PER_DAY
 
 # 失败退避：同一条 HR 消息连续生成失败 N 次后，M 秒内不再重试
 REPLY_FAILURE_LIMIT = 3
@@ -89,6 +98,49 @@ def match_conversation_item(item: dict, known_convs: List[dict]) -> Optional[dic
         if kc_name and len(kc_name) >= 3 and kc_name in text:
             return kc
     return None
+
+
+def merge_friend_records(store: dict, friends: list) -> int:
+    """合并好友身份记录到 store(名字→[{sid, last_msg}])，返回新增条数。
+
+    数据源是旁听/主动拉取的 BOSS 好友接口(字段: name/bossName + securityId + lastMsg)。
+    同名 HR 各自保留独立记录，靠 last_msg 与会话列表预览做二次关联。
+    """
+    merged = 0
+    for f in friends or []:
+        if not isinstance(f, dict):
+            continue
+        name = str(f.get("name") or f.get("bossName") or f.get("realName") or "").strip()
+        sid = str(f.get("securityId") or "").strip()
+        if not name or not sid:
+            continue
+        rec = {"sid": sid, "last_msg": str(f.get("lastMsg") or "").strip()}
+        bucket = store.setdefault(name, [])
+        if any(r["sid"] == sid for r in bucket):
+            continue
+        bucket.append(rec)
+        merged += 1
+    return merged
+
+
+def resolve_item_sid(item: dict, friend_records: dict) -> str:
+    """为会话列表条目解析 securityId。
+
+    名字唯一 → 直接用；同名多条 → 用最后消息预览与好友记录的 last_msg 关联；
+    仍无法区分 → 返回空串（宁可退回名字匹配，也不错绑身份）。
+    """
+    name = (item.get("hr_name") or "").strip()
+    recs = friend_records.get(name) or []
+    if not recs:
+        return ""
+    if len(recs) == 1:
+        return recs[0]["sid"]
+    text = (item.get("text") or "").replace("\n", " ")
+    for r in recs:
+        lm = (r.get("last_msg") or "")[:40]
+        if lm and lm in text:
+            return r["sid"]
+    return ""
 
 
 class BossChatMonitor(BossApplier):
@@ -194,26 +246,124 @@ class BossChatMonitor(BossApplier):
 
         return self._attach_security_ids(conversations)
 
+    def _install_sniffer(self):
+        """挂网络监听(每个页面对象一次): 被动收割好友身份记录与 encryptSystemId。
+
+        BOSS 前端加载聊天页时会自己调 getGeekFriendList.json(响应含全部好友的
+        securityId+名字+最后消息)和带 encryptSystemId 的请求——旁听即可，无需
+        访问 window 全局变量(旧方案的死路)。
+        """
+        page_key = id(self.page)
+        if getattr(self, "_sniffer_page_id", None) == page_key:
+            return
+        self._sniffer_page_id = page_key
+        if not hasattr(self, "_friend_records"):
+            self._friend_records = {}
+        if not hasattr(self, "_geek_encrypt_id"):
+            self._geek_encrypt_id = ""
+
+        def on_request(req):
+            try:
+                if not self._geek_encrypt_id:
+                    m = re.search(r"[?&]encryptSystemId=([A-Za-z0-9]{10,})", req.url)
+                    if m:
+                        self._geek_encrypt_id = m.group(1)
+                        log.info(f"[Sniffer] 收割 encryptSystemId: {self._geek_encrypt_id[:12]}...")
+            except Exception:
+                pass
+
+        def on_response(resp):
+            try:
+                url = resp.url
+                if "getGeekFriendList" in url or "geekFilterByLabel" in url:
+                    data = resp.json()
+                    zp = (data or {}).get("zpData") or {}
+                    merged = merge_friend_records(
+                        self._friend_records, zp.get("result") or zp.get("friends") or []
+                    )
+                    if merged:
+                        total = sum(len(v) for v in self._friend_records.values())
+                        log.info(f"[Sniffer] 被动捕获好友身份 +{merged}，累计 {total} 人")
+            except Exception:
+                pass
+
+        self.page.on("request", on_request)
+        self.page.on("response", on_response)
+        log.debug("[Sniffer] 网络监听已挂载")
+
+    def _fetch_friend_list_active(self) -> bool:
+        """主动分页拉取好友身份列表(同源GET、cookie自动携带，与页面自身行为一致)。
+
+        被动监听是机遇型的(BOSS 前端没刷新列表就没有响应可听)，主动补拉保证
+        每个监控周期都能建立全量映射。翻页参数未官方文档化，用"首页重复即停"
+        防死循环。
+        """
+        try:
+            seen_first_sids = set()
+            for page_no in range(1, 16):
+                data = self.page.evaluate(
+                    """async (pageNo) => {
+                        const r = await fetch(`/wapi/zprelation/friend/getGeekFriendList.json?page=${pageNo}`, {
+                            headers: {'Accept': 'application/json'}, credentials: 'include'
+                        });
+                        return await r.json();
+                    }""",
+                    page_no,
+                )
+                zp = (data or {}).get("zpData") or {}
+                result = zp.get("result") or []
+                if not result:
+                    break
+                merge_friend_records(self._friend_records, result)
+                first_sid = str(result[0].get("securityId") or "")
+                if first_sid in seen_first_sids:
+                    break
+                seen_first_sids.add(first_sid)
+                if len(result) < 20:
+                    break
+                pause(0.3, 0.8)
+            if self._friend_records:
+                total = sum(len(v) for v in self._friend_records.values())
+                log.info(f"[Sniffer] 主动拉取好友身份列表: 累计 {total} 人")
+                return True
+            return False
+        except Exception as e:
+            log.debug(f"[Sniffer] 主动拉取好友列表失败: {e}")
+            return False
+
     def _attach_security_ids(self, conversations: List[dict]) -> List[dict]:
         """给会话条目附加 securityId(BOSS 会话唯一身份)。
 
-        每轮只调一次 friends API 建 name→securityId 映射(比原来 send_wechat 时
-        每会话最多 3 次重试的调用频率更低);失败静默退化,不影响原有流程。
+        优先用网络监听积累的好友身份记录(支持同名 HR 按最后消息关联)；
+        记录为空时主动拉取一次；再不行退化到旧 friends API；全失败则静默
+        返回(条目无 sid,匹配退回名字路径)。
         """
         if not conversations:
             return conversations
         try:
-            sid_map = self._fetch_friend_sid_map()
-            if not sid_map:
+            if not self._friend_records:
+                self._fetch_friend_list_active()
+            if not self._friend_records:
+                sid_map = self._fetch_friend_sid_map()
+                if sid_map:
+                    for c in conversations:
+                        name = (c.get("hr_name") or "").strip()
+                        if name and name in sid_map and not c.get("security_id"):
+                            c["security_id"] = sid_map[name]
                 return conversations
-            attached = 0
+            resolved = 0
             for c in conversations:
-                name = (c.get("hr_name") or "").strip()
-                if name and name in sid_map:
-                    c["security_id"] = sid_map[name]
-                    attached += 1
-            if attached:
-                log.debug(f"[监控] securityId 映射: {attached}/{len(conversations)} 个会话条目附加成功")
+                if c.get("security_id"):
+                    continue
+                sid = resolve_item_sid(c, self._friend_records)
+                if sid:
+                    c["security_id"] = sid
+                    resolved += 1
+            if resolved:
+                log.debug(
+                    f"[Sniffer] 身份解析: {resolved}/{len(conversations)} 个条目获得 sid"
+                    f"（映射库 {sum(len(v) for v in self._friend_records.values())} 人）"
+                )
         except Exception as e:
             log.debug(f"[监控] securityId 映射获取失败(退化用名字匹配): {e}")
         return conversations
@@ -413,14 +563,51 @@ class BossChatMonitor(BossApplier):
             log.error(f"send_message 失败: {e}", exc_info=True)
             return False
 
+    def _verify_window_identity(self, conv_id: int) -> bool:
+        """内容指纹身份校验：窗口里应能看到该会话库中已知的最后一条 HR 消息。
+
+        原理：不同 HR 的聊天内容几乎不可能恰好相同，"窗口可见的最后 HR 消息
+        包含数据库记录的那条"即可高度确信点开的是同一个人的窗口。
+        HR 在上次同步之后又发了新消息也算通过（旧消息仍在窗口历史里可见）。
+        任何无法比对的情况一律放行（不阻塞正常流程）。
+        """
+        try:
+            # 拿库中最近几条 HR 消息做指纹集合（HR 在同步后又发新消息时，
+            # 旧消息可能被顶出可视区，单比最后一条会误伤）
+            needles = [
+                str(c).strip()[:40]
+                for c in get_recent_hr_messages(conv_id, limit=5)
+                if c and len(str(c).strip()) >= 2
+            ]
+            if not needles:
+                return True  # 无历史可比（新会话等）
+            msgs = self.read_visible_messages()
+            win_hr_texts = [
+                (m.get("content") or "").strip()
+                for m in msgs
+                if m.get("sender") == "hr" and (m.get("content") or "").strip()
+            ]
+            if not win_hr_texts:
+                return True  # 窗口还没有 HR 消息可比
+            return any(n in t for n in needles for t in win_hr_texts)
+        except Exception as e:
+            log.debug(f"[监控] 内容指纹校验异常(放行): {e}")
+            return True
+
     def _get_chat_security_id(self, hr_name: str = "") -> str:
         """从 BOSS API 或页面提取对方 securityId。"""
+        # 熔断: 连续失败太多次说明三条提取路径在当前页面上都失效(Vue SPA 不暴露),
+        # 冷却期内直接返回空,避免每个会话浪费 6 秒重试。恢复靠网络监听方案的
+        # attach/回填路径,不靠这里。
+        if time.time() < getattr(self, "_sid_cb_until", 0):
+            return ""
         for attempt in range(3):  # 重试3次
             try:
                 # 方式1: 页面 HTML 正则搜
                 html = self.page.content()
                 m = re.search(r'securityId["\']?\s*[:=]\s*["\']([A-Za-z0-9_~+/=-]{30,})["\']', html)
                 if m:
+                    self._mark_sid_success()
                     return m.group(1)
 
                 # 方式2: JS 全局对象
@@ -435,6 +622,7 @@ class BossChatMonitor(BossApplier):
                     return '';
                 }""")
                 if sid:
+                    self._mark_sid_success()
                     return sid
 
                 # 方式3: BOSS API 获取会话列表, 按 HR 名匹配
@@ -462,6 +650,7 @@ class BossChatMonitor(BossApplier):
                     for f in friends:
                         fn = (f.get("bossName") or f.get("realName") or "").strip()
                         if fn == hr_name:
+                            self._mark_sid_success()
                             return f.get("securityId", "")
 
                 if attempt < 2:
@@ -473,8 +662,20 @@ class BossChatMonitor(BossApplier):
                 if attempt < 2:
                     pause(1, 2)
 
-        log.warning(f"securityId 获取失败（3次重试），HR: {hr_name}")
+        # 失败计数熔断: 连续 15 次全失败 → 冷却 10 分钟,期间直接返回空
+        streak = getattr(self, "_sid_fail_streak", 0) + 1
+        self._sid_fail_streak = streak
+        if streak >= 15:
+            self._sid_cb_until = time.time() + 600
+            self._sid_fail_streak = 0
+            log.warning("[securityId] 连续失败 15 次，三条提取路径失效，熔断 10 分钟")
+        else:
+            log.warning(f"securityId 获取失败（3次重试），HR: {hr_name}")
         return ""
+
+    def _mark_sid_success(self):
+        """sid 获取成功时清零失败计数。"""
+        self._sid_fail_streak = 0
 
     def send_wechat(self, hr_name: str = "") -> bool:
         """通过 BOSS API 发起交换，等弹窗出现后点「确定」。"""
@@ -695,6 +896,8 @@ class BossChatMonitor(BossApplier):
 
     def _scan_list(self) -> Optional[List[dict]]:
         """[pw线程] 导航+安全检查+扫描未读列表+孤儿sweep合并。失败返回 None。"""
+        # 挂网络监听(幂等): 被动收割好友身份映射(securityId 数据源)
+        self._install_sniffer()
         # 只在不在聊天页时才导航（避免每轮刷新页面，触发 BOSS 登录检查）
         current_url = self.page.url
         if "/web/geek/chat" not in current_url:
@@ -829,6 +1032,19 @@ class BossChatMonitor(BossApplier):
             matched_conv = get_conversation(conv_id) or stale_conv
         else:
             matched_conv = match_conversation_item(item, known_convs)
+            if matched_conv is not None:
+                # 条目已解析出 sid 且会话还没有 → 回填，之后每轮都能精确匹配
+                item_sid = (item.get("security_id") or "").strip()
+                if item_sid and not (matched_conv.get("security_id") or "").strip():
+                    try:
+                        update_conversation_security_id(matched_conv["id"], item_sid)
+                        matched_conv["security_id"] = item_sid
+                        log.info(
+                            f"[Sniffer] 回填会话 securityId: {matched_conv.get('hr_name')}"
+                            f" -> {item_sid[:12]}..."
+                        )
+                    except Exception:
+                        pass
             if matched_conv is None:
                 lines = [l.strip() for l in text.split("\n") if l.strip()]
                 hr_name = item.get("hr_name", "") or lines[0] if lines else ""
@@ -915,29 +1131,8 @@ class BossChatMonitor(BossApplier):
             return None
         handled.add(conv_id)
 
-        # 从会话文本里提取公司名（格式：HR名+公司名+岗位）
-        if not matched_conv.get("hr_company"):
-            company_info = text.split("\n")[0] if "\n" in text else text
-            import re as _re3
-
-            hr_name_part = matched_conv.get("hr_name", "")
-            if hr_name_part and len(hr_name_part) >= 2:
-                company_info = company_info.replace(hr_name_part, "", 1)
-            # 去掉时间/状态/括号等
-            company_info = _re3.sub(r"\d{1,2}:\d{2}|\[.*?\]|送达|已读|未读", "", company_info)
-            # 提取公司名（纯中文 4-12字）
-            m = _re3.search(r"[\u4e00-\u9fa5]{4,12}", company_info)
-            if m:
-                company = m.group()
-                try:
-                    from backend.state import get_db as _gdb3
-
-                    _gdb3().execute("UPDATE conversations SET hr_company=? WHERE id=?", (company, conv_id))
-                    _gdb3().commit()
-                    matched_conv["hr_company"] = company
-                    log.info(f"[监控] 提取公司名: {company}")
-                except Exception:
-                    pass
+        # 公司/岗位信息不再从会话列表文本猜测(旧正则基本提不准)，
+        # 统一改由打开会话后从聊天页头部提取，见 _extract_chat_context
 
         if matched_conv.get("status") != "active":
             return None
@@ -964,6 +1159,7 @@ class BossChatMonitor(BossApplier):
         expected_sid = (item.get("security_id") or "").strip() or (
             matched_conv.get("security_id") or ""
         ).strip()
+        page_sid = ""
         if expected_sid:
             page_sid = self._get_chat_security_id(hr_name_to_open)
             if page_sid and page_sid != expected_sid:
@@ -983,7 +1179,19 @@ class BossChatMonitor(BossApplier):
                 matched_conv["security_id"] = page_sid
                 log.debug(f"[监控] 学习会话 securityId: {hr_name_to_open} -> {page_sid[:10]}...")
 
+        # ── 内容指纹校验(sid 没能确认时的兜底安全网) ──
+        # 窗口内应能看到该会话已知的最后一条 HR 消息;看不到说明点开的窗口
+        # 属于别人(典型:同名 HR 点错行)。
+        if not page_sid and not self._verify_window_identity(conv_id):
+            log.warning(
+                f"[监控] ⚠️ 内容指纹校验失败: 窗口内找不到会话 {hr_name_to_open} 的已知消息，"
+                "疑似打开了同名会话，跳过防止回错人"
+            )
+            return None
+
         # ── 读取消息 ──
+        # 先从聊天页头部提取公司/岗位（比会话列表文本可靠，覆盖旧正则提取不到的场景）
+        self._extract_chat_context(conv_id, matched_conv)
         msgs = self.read_visible_messages()
         log.info(f"[监控] 会话 {matched_conv.get('hr_name')}: 读到 {len(msgs)} 条消息")
 
@@ -1047,6 +1255,150 @@ class BossChatMonitor(BossApplier):
             "last_me": last_me,
         }
 
+    # 聊天页头部结构（BOSS 前端更新时只需改这里）:
+    # .base-info: [.name-content .name-text]=HR名, 无class的span=公司名, .base-title=HR头衔
+    # .chat-position-content .position-content: .position-name=岗位名, .salary, .city
+    # 公司名偶尔不在头部 → 兜底读左侧列表中同名会话行的 name-box 第二个span
+    EXTRACT_CHAT_CONTEXT_JS = """(expectedName) => {
+        const trim = s => (s || '').trim();
+        const base = document.querySelector('.chat-conversation .base-info, .top-info-content .base-info');
+        let hr_name = '', company = '', hr_title = '';
+        if (base) {
+            hr_name = trim((base.querySelector('.name-content .name-text') || {}).textContent);
+            hr_title = trim((base.querySelector('.base-title') || {}).textContent);
+            const compSpan = [...base.querySelectorAll(':scope > span')].find(
+                s => !s.className && trim(s.textContent)
+            );
+            company = compSpan ? trim(compSpan.textContent) : '';
+        }
+        const bar = document.querySelector('.chat-position-content .position-content, [ka="geek_chat_job_detail"]');
+        let job_title = '';
+        if (bar) {
+            job_title = trim((bar.querySelector('.position-name') || {}).textContent);
+        }
+        if (!company && expectedName) {
+            // 兜底: 头部没有公司名时,从左侧列表同名会话行取(结构: .name-text=HR名, span=公司名, i.vline, span=头衔)
+            for (const nb of document.querySelectorAll('li[role="listitem"] .name-box')) {
+                const nameEl = nb.querySelector('.name-text');
+                if (!nameEl || trim(nameEl.textContent) !== expectedName) continue;
+                const spans = [...nb.querySelectorAll(':scope > span')].filter(
+                    s => !s.className && s !== nameEl && trim(s.textContent)
+                );
+                if (spans.length) company = trim(spans[0].textContent);
+                if (!hr_name) hr_name = expectedName;
+                break;
+            }
+        }
+        return {hr_name, company, hr_title, job_title};
+    }"""
+
+    def _extract_chat_context(self, conv_id: int, matched_conv: dict):
+        """会话已打开时，从聊天页头部提取公司/岗位信息并回写会话(PW线程内调用)。"""
+        try:
+            info = (
+                self.page.evaluate(self.EXTRACT_CHAT_CONTEXT_JS, matched_conv.get("hr_name") or "")
+                or {}
+            )
+        except Exception as e:
+            log.debug(f"[监控] 提取聊天上下文失败: {e}")
+            return
+        company = (info.get("company") or "").strip()
+        job_title = (info.get("job_title") or "").strip()
+        if not company and not job_title:
+            return
+        changed = []
+        if company and company != (matched_conv.get("hr_company") or ""):
+            changed.append(("hr_company", company))
+        if job_title and job_title != (matched_conv.get("job_title") or ""):
+            changed.append(("job_title", job_title))
+        if not changed:
+            return
+        try:
+            from backend.state import update_conversation_job_context
+
+            update_conversation_job_context(
+                conv_id,
+                hr_company=company or None,
+                job_title=job_title or None,
+            )
+            for k, v in changed:
+                matched_conv[k] = v
+            log.info(f"[监控] 提取岗位上下文: {matched_conv.get('hr_name')} | 公司={company or '-'} 岗位={job_title or '-'}")
+        except Exception as e:
+            log.debug(f"[监控] 岗位上下文回写失败: {e}")
+
+    def capture_job_url(self) -> str:
+        """点击聊天头部岗位条(查看职位)，捕获岗位详情页URL(PW线程内调用)。
+
+        BOSS 岗位条不是 <a>，链接由 JS 点击后打开；且点击常先经过安全验证中转页
+        (/web/passport/zp/security.html)，真实岗位地址在该页 URL 的 callbackUrl 参数里。
+        优先捕获新标签页，兜底处理同标签页跳转。失败返回空串，绝不抛异常。
+        """
+        try:
+            loc = self.page.locator(
+                '.chat-position-content .position-content, [ka="geek_chat_job_detail"]'
+            ).first
+            if loc.count() == 0:
+                return ""
+            before_url = self.page.url
+            url = ""
+            try:
+                with self.page.context.expect_page(timeout=6000) as popup_info:
+                    loc.click(timeout=5000)
+                popup = popup_info.value
+                # 安全检查可能自动通过并跳转到岗位页，先等一拍
+                try:
+                    popup.wait_for_url("**/job_detail/**", timeout=4000)
+                except Exception:
+                    try:
+                        popup.wait_for_load_state("domcontentloaded", timeout=6000)
+                    except Exception:
+                        pass
+                url = self._resolve_job_url(popup.url or "")
+                try:
+                    popup.close()
+                except Exception:
+                    pass
+            except Exception:
+                url = ""
+            if not url:
+                cur = self.page.url
+                if cur != before_url:
+                    url = self._resolve_job_url(cur)
+                    try:
+                        self.page.go_back(timeout=20000)
+                        pause(1, 2)
+                    except Exception:
+                        pass
+            return url
+        except Exception as e:
+            log.debug(f"[监控] 捕获岗位链接失败: {e}")
+            return ""
+
+    @staticmethod
+    def _resolve_job_url(url: str) -> str:
+        """从最终/中转 URL 解析岗位详情地址；解析不出返回空串。"""
+        from urllib.parse import unquote, urlparse, parse_qs
+
+        url = (url or "").strip()
+        if not url:
+            return ""
+        # 安全验证中转页: 真实地址在 callbackUrl 参数
+        if "/web/passport/zp/security.html" in url:
+            try:
+                qs = parse_qs(urlparse(url).query)
+                callback = (qs.get("callbackUrl") or [""])[0]
+                callback = unquote(callback)
+                if "/job_detail/" in callback:
+                    path = callback.split("?")[0]
+                    return f"https://www.zhipin.com{path}" if path.startswith("/") else path
+            except Exception:
+                pass
+            return ""
+        if "/job_detail/" in url:
+            return url.split("?")[0].strip()
+        return ""
+
     def _resolve_job_info(self, matched_conv: dict, conv_id: int, hr_name: str) -> dict:
         """解析岗位信息:会话关联的投递记录优先,无关联时按 HR 名反查回填。"""
         job_title = matched_conv.get("job_title", "")
@@ -1109,8 +1461,9 @@ class BossChatMonitor(BossApplier):
         if get_setting("auto_reply_enabled", "true") != "true":
             log.info("[监控] 自动回复已关闭，跳过")
             return task
-        if get_today_auto_reply_count() >= MAX_AUTO_REPLY_PER_DAY:
-            log.info(f"[监控] 今日自动回复已达上限 {MAX_AUTO_REPLY_PER_DAY}，跳过")
+        max_auto_reply = get_max_auto_reply_per_day()
+        if get_today_auto_reply_count() >= max_auto_reply:
+            log.info(f"[监控] 今日自动回复已达上限 {max_auto_reply}，跳过")
             return task
 
         # 失败退避：同一条消息连续失败次数超限 → 冷却期内跳过
@@ -1130,12 +1483,24 @@ class BossChatMonitor(BossApplier):
             return task
 
         try:
-            # 面试邀约静默闸门: HR 提出具体面试时间的邀约 → 只记录排期,不生成不发送任何回复
+            # 面试邀约闸门: HR 提出具体面试时间的邀约 → 成功入排期则静默;
+            # 时间冲突则回复"两段式改期引导"(说明冲突+报真实空闲时段,不代表本人确认)
+            # 确认邀约后才捕获岗位链接(llm线程 → hop回pw线程点击查看职位),避免对每条消息都动浏览器
             from backend.interview_gate import handle_interview_invite
 
-            if handle_interview_invite(conv_id, hr_message, matched_conv, task.get("job_info") or {}):
-                log.info(f"[监控] 面试邀约静默处理(不回复): {matched_conv.get('hr_name')}")
-                task["reply"] = ""
+            def _get_job_url():
+                return runtime.run_in_pw(self.capture_job_url)
+
+            gate_reply = handle_interview_invite(
+                conv_id, hr_message, matched_conv, task.get("job_info") or {}, get_job_url=_get_job_url
+            )
+            if gate_reply is not None:
+                task["reply"] = gate_reply
+                task["interest"] = "high"  # 主动约面试的 HR 是高意向
+                if gate_reply:
+                    log.info(f"[监控] 面试邀约冲突,回复改期引导: {matched_conv.get('hr_name')}")
+                else:
+                    log.info(f"[监控] 面试邀约静默处理(不回复): {matched_conv.get('hr_name')}")
                 return task
 
             from backend.replier import generate_reply
