@@ -887,6 +887,12 @@ class BossScraper:
                 return jobs
 
             log.info(f"[搜索] 开始提取 HR 活跃时间，共 {len(links)} 个链接")
+            # 逐岗位浏览间隔(设置项 job_view_interval_sec),随机抖动避免固定节奏触发人机验证
+            try:
+                view_interval = max(0.3, float(get_setting("job_view_interval_sec", "2")))
+            except (TypeError, ValueError):
+                view_interval = 2.0
+            log.info(f"[搜索] 岗位浏览间隔: {view_interval}s")
             # 创建 URL 到 job 的映射
             url_to_job = {j.get("url", ""): j for j in jobs}
             log.info(f"[搜索] job URL 样本: {list(url_to_job.keys())[:3]}")
@@ -927,7 +933,7 @@ class BossScraper:
                     # 点击卡片，等待右边详情面板渲染
                     clicked += 1
                     link.click()
-                    time.sleep(0.5)
+                    time.sleep(random.uniform(view_interval * 0.8, view_interval * 1.3))
 
                     # 从页面级别提取 HR 活跃时间（右边详情面板）
                     hr_active = self.page.evaluate("""() => {
@@ -955,9 +961,14 @@ class BossScraper:
         log.info(f"[搜索] HR 活跃时间提取完成: 点击{clicked}次, 跳过[无href:{skip_no_href}, 未匹配:{skip_no_job}, 已有数据:{skip_has_data}], 有数据:{len(hr_with_active)}/{len(jobs)}")
         return jobs
 
-    def _scroll_all(self, min_jobs=200):
-        """持续滚动加载岗位，直到达到 min_jobs 或无新内容。"""
+    def _scroll_all(self, min_jobs=None):
+        """持续滚动加载岗位，直到达到目标数量(设置项 job_search_limit)或无新内容。"""
         try:
+            if min_jobs is None:
+                try:
+                    min_jobs = max(10, int(get_setting("job_search_limit", "200")))
+                except (TypeError, ValueError):
+                    min_jobs = 200
             prev_count = 0
             no_new_rounds = 0
             while no_new_rounds < 3:

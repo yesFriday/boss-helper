@@ -156,8 +156,12 @@ def _build_scheduler_deps() -> SchedulerDeps:
 
 @app.on_event("startup")
 async def on_startup():
-    global automation, monitor_task, scheduler_task, browser_sync_lock, scheduler
+    global automation, monitor_task, scheduler_task, browser_sync_lock, scheduler, monitor_paused
     browser_sync_lock = asyncio.Lock()
+    # 恢复上次的监控暂停状态(用户通过暂停按钮持久化的)
+    monitor_paused = get_setting("monitor_paused", "false") == "true"
+    if monitor_paused:
+        log.info("[启动] 监控处于暂停状态(重启前已暂停),不会自动回复")
     # 清理旧垃圾会话 + 合并同名重复会话
     try:
         from backend.state import get_db
@@ -379,6 +383,8 @@ class SettingsUpdate(BaseModel):
     resume_summary: Optional[str] = None
     wechat_id: Optional[str] = None
     search_keywords: Optional[str] = None  # 逗号分隔的搜索关键词
+    job_view_interval_sec: Optional[str] = None  # 搜索时逐岗位浏览间隔(秒),过快易触发人机验证
+    job_search_limit: Optional[str] = None  # 单次搜索滚动加载的目标岗位数
     selector_overrides: Optional[str] = None  # JSON 格式的选择器覆盖
     ai_api_key: Optional[str] = None  # AI API Key
     ai_base_url: Optional[str] = None  # AI Base URL
@@ -711,6 +717,7 @@ async def manual_heartbeat():
 async def pause_monitor():
     global monitor_paused
     monitor_paused = True
+    set_setting("monitor_paused", "true")  # 持久化,重启后恢复暂停状态
     await broadcast_ws({"type": "monitor_paused"})
     return {"status": "paused"}
 
@@ -719,6 +726,7 @@ async def pause_monitor():
 async def resume_monitor():
     global monitor_paused, monitor_task
     monitor_paused = False
+    set_setting("monitor_paused", "false")
     if automation and automation.page and (monitor_task is None or monitor_task.done()):
         monitor_task = asyncio.create_task(chat_monitor_loop())
         log.info("[监控] 恢复监控并拉起监控任务")
@@ -1000,8 +1008,9 @@ async def apply_to_job(req: ApplyRequest):
         style = get_setting("ai_reply_style", "professional")
         greeting = generate_greeting(title, company, style=style)
 
-    # 在后台线程运行（Playwright 是同步的）
-    result = await _run_pw(automation.apply_to_job, req.job_url, greeting)
+    # 在后台线程运行（Playwright 是同步的）；独占闸门让监控让路,避免互相抢导航
+    async with browser_ops.browser_op(automation, reason="投递岗位"):
+        result = await _run_pw(automation.apply_to_job, req.job_url, greeting)
     if result.get("success"):
         await broadcast_ws(
             {
@@ -1037,7 +1046,9 @@ async def apply_batch(req: ApplyBatchRequest):
     remaining = daily_limit - get_today_application_count()
     urls = valid_urls[: max(1, remaining)]
 
-    results = await _run_pw(automation.apply_batch, urls, req.greeting)
+    # 独占闸门:批量投递期间监控整轮让路,避免互相抢导航
+    async with browser_ops.browser_op(automation, reason="批量投递"):
+        results = await _run_pw(automation.apply_batch, urls, req.greeting)
     await broadcast_ws(
         {
             "type": "batch_complete",

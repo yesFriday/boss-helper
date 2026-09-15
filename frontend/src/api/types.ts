@@ -81,6 +81,8 @@ export interface Settings {
   resume_summary: string
   wechat_id: string
   search_keywords: string
+  job_view_interval_sec?: string
+  job_search_limit?: string
   auto_reply_enabled: string
   ai_base_url: string
   ai_model: string

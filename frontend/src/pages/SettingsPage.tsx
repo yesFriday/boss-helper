@@ -81,6 +81,8 @@ export function SettingsPage() {
     resume_summary: '',
     wechat_id: '',
     search_keywords: '',
+    job_view_interval_sec: '2',
+    job_search_limit: '200',
     auto_reply_enabled: 'true',
     ai_platform: '',
     ai_api_key: '',
@@ -135,6 +137,8 @@ export function SettingsPage() {
         resume_summary: s.resume_summary || '',
         wechat_id: s.wechat_id || '',
         search_keywords: (s.search_keywords || '').replace(/,/g, '\n'),
+        job_view_interval_sec: s.job_view_interval_sec || '2',
+        job_search_limit: s.job_search_limit || '200',
         auto_reply_enabled: s.auto_reply_enabled || 'true',
         ai_platform: detectedPlatform,
         ai_api_key: s.ai_api_key || '',
@@ -167,6 +171,8 @@ export function SettingsPage() {
         resume_summary: formData.resume_summary,
         wechat_id: formData.wechat_id,
         search_keywords: formData.search_keywords.replace(/\n/g, ','),
+        job_view_interval_sec: formData.job_view_interval_sec,
+        job_search_limit: formData.job_search_limit,
         auto_reply_enabled: formData.auto_reply_enabled,
         ai_base_url: formData.ai_base_url,
         ai_model: formData.ai_model,
@@ -296,6 +302,28 @@ export function SettingsPage() {
           rows={4}
           className={inputCls + ' resize-y min-h-[80px] font-mono text-xs'}
         />
+        <Field label="搜索岗位数量" hint="单次搜索滚动加载的目标岗位数，BOSS 实际可返回数量可能少于此值">
+          <input
+            type="number"
+            value={formData.job_search_limit}
+            onChange={(e) => setField('job_search_limit', e.target.value)}
+            min={10}
+            max={500}
+            step={10}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="岗位浏览间隔(秒)" hint="搜索结果逐个点击岗位卡片读取信息的间隔，过快易触发人机验证，建议 2~5 秒">
+          <input
+            type="number"
+            value={formData.job_view_interval_sec}
+            onChange={(e) => setField('job_view_interval_sec', e.target.value)}
+            min={0.5}
+            max={30}
+            step={0.5}
+            className={inputCls}
+          />
+        </Field>
       </Section>
 
       {/* 招呼语 */}

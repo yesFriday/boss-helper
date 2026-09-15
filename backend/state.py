@@ -236,6 +236,8 @@ def init_db():
         "resume_summary": "",
         "wechat_id": "",
         "search_keywords": "AI Agent,大模型开发,AI产品经理,RAG开发,大模型应用",
+        "job_view_interval_sec": "2",
+        "job_search_limit": "200",
         "scheduler_config": json.dumps({
             "enabled": False,
             "days": [],
